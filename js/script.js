@@ -4,7 +4,7 @@
    ============================================ */
 
 // ---- SUPABASE CONFIG ----
-const SUPABASE_URL = https://bkfsjhhclbqrhaolvhmz.supabase.co'   // e.g. https://bkfsjhhclbqrhaolvhmz.supabase.co
+const SUPABASE_URL = 'https://bkfsjhhclbqrhaolvhmz.supabase.co'   // e.g. https://bkfsjhhclbqrhaolvhmz.supabase.co
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJrZnNqaGhjbGJxcmhhb2x2aG16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxNTQwNzksImV4cCI6MjA5NTczMDA3OX0.CSO6htrFeFYr93yOBo2iFK4Ul-QcoiGKIG4rAJxv6kY';      // the long eyJ... key
 
 async function supabaseInsert(table, data) {
