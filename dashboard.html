@@ -147,6 +147,23 @@
   .toast-error { background:var(--reddim); border:1px solid var(--red); color:var(--red); }
   @keyframes slideUp { from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none} }
 
+  /* UPLOAD */
+  .drop-zone { border:2px dashed var(--border); border-radius:var(--rl); padding:48px 24px; text-align:center; cursor:pointer; transition:all .2s; background:var(--bg2); }
+  .drop-zone:hover,.drop-zone.dragover { border-color:var(--blue); background:var(--bluedim); }
+  .drop-icon { font-size:48px; margin-bottom:12px; }
+  .drop-title { font-size:16px; font-weight:700; margin-bottom:6px; }
+  .drop-sub { font-size:12px; color:var(--text2); }
+  .upload-progress { margin-top:16px; }
+  .prog-row { display:flex; align-items:center; gap:12px; margin-bottom:8px; font-size:12px; }
+  .prog-label { width:160px; flex-shrink:0; color:var(--text2); }
+  .prog-bar-bg { flex:1; height:8px; background:var(--bg2); border-radius:4px; overflow:hidden; }
+  .prog-bar-fill { height:100%; background:var(--blue); border-radius:4px; transition:width .3s ease; }
+  .prog-count { width:80px; text-align:right; font-family:var(--mono); color:var(--text2); }
+  .upload-log { background:var(--bg2); border:1px solid var(--border); border-radius:var(--r); padding:14px; margin-top:14px; max-height:280px; overflow-y:auto; font-family:var(--mono); font-size:11px; }
+  .log-line { padding:3px 0; border-bottom:1px solid var(--borderl); }
+  .log-ok { color:var(--green); } .log-err { color:var(--red); } .log-info { color:var(--text2); } .log-warn { color:var(--yellow); }
+  .file-pill { display:inline-flex; align-items:center; gap:8px; background:var(--bg2); border:1px solid var(--border); border-radius:20px; padding:6px 14px; margin:6px 4px; font-size:12px; }
+  .file-pill-name { font-weight:600; } .file-pill-size { color:var(--text2); }
   .section-title { font-size:18px; font-weight:700; margin-bottom:4px; }
   .section-desc { font-size:13px; color:var(--text2); margin-bottom:20px; }
   .rank-num { font-family:var(--mono); font-weight:700; font-size:13px; color:var(--textm); }
@@ -191,6 +208,7 @@
     <div class="nav-label">Data Entry</div>
     <div class="nav-item" onclick="showPage('entry',this)"><span class="nav-icon">➕</span>Log Delivery</div>
     <div class="nav-item" onclick="showPage('surveyentry',this)"><span class="nav-icon">📝</span>Submit Survey</div>
+    <div class="nav-item" onclick="showPage('upload',this)"><span class="nav-icon">📤</span>Upload CSV / Excel</div>
   </div>
   <div class="sidebar-foot">
     <div class="live-dot"><div class="pulse"></div><span>Live · Supabase</span></div>
@@ -460,9 +478,371 @@
     </div>
   </div>
 
+  <!-- UPLOAD PAGE -->
+  <div class="page" id="page-upload">
+    <div class="section-title">Upload CSV / Excel Data</div>
+    <div class="section-desc">Upload your filled DPI template — deliveries and surveys import directly to Supabase</div>
+
+    <!-- Sheet selector -->
+    <div class="grid2" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">📤 Upload Delivery Data</div>
+          <div class="card-sub">CSV from 🚛 Delivery Data sheet</div>
+        </div>
+        <div class="card-body">
+          <div class="drop-zone" id="dropDel" onclick="document.getElementById('fileDel').click()"
+            ondragover="dragOver(event,'dropDel')" ondragleave="dragLeave('dropDel')" ondrop="dropFile(event,'delivery')">
+            <div class="drop-icon">🚛</div>
+            <div class="drop-title">Drop delivery CSV here</div>
+            <div class="drop-sub">or click to browse · CSV files only · up to 5,000 rows</div>
+          </div>
+          <input type="file" id="fileDel" accept=".csv" style="display:none" onchange="handleFile(this,'delivery')">
+          <div id="delFileInfo" style="margin-top:10px"></div>
+          <div class="upload-progress" id="delProgress" style="display:none">
+            <div class="prog-row">
+              <div class="prog-label">Uploading deliveries…</div>
+              <div class="prog-bar-bg"><div class="prog-bar-fill" id="delBar" style="width:0%"></div></div>
+              <div class="prog-count" id="delCount">0 / 0</div>
+            </div>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:10px">
+            <button class="btn btn-green" onclick="startUpload('delivery')" id="btnUploadDel" style="display:none">
+              💾 Upload to Supabase
+            </button>
+            <button class="btn btn-ghost" onclick="clearUpload('delivery')" id="btnClearDel" style="display:none">
+              Clear
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">⭐ Upload Survey Data</div>
+          <div class="card-sub">CSV from ⭐ Survey Data sheet</div>
+        </div>
+        <div class="card-body">
+          <div class="drop-zone" id="dropSurv" onclick="document.getElementById('fileSurv').click()"
+            ondragover="dragOver(event,'dropSurv')" ondragleave="dragLeave('dropSurv')" ondrop="dropFile(event,'survey')">
+            <div class="drop-icon">⭐</div>
+            <div class="drop-title">Drop survey CSV here</div>
+            <div class="drop-sub">or click to browse · CSV files only · up to 5,000 rows</div>
+          </div>
+          <input type="file" id="fileSurv" accept=".csv" style="display:none" onchange="handleFile(this,'survey')">
+          <div id="survFileInfo" style="margin-top:10px"></div>
+          <div class="upload-progress" id="survProgress" style="display:none">
+            <div class="prog-row">
+              <div class="prog-label">Uploading surveys…</div>
+              <div class="prog-bar-bg"><div class="prog-bar-fill" id="survBar" style="width:0%"></div></div>
+              <div class="prog-count" id="survCount">0 / 0</div>
+            </div>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:10px">
+            <button class="btn btn-green" onclick="startUpload('survey')" id="btnUploadSurv" style="display:none">
+              💾 Upload to Supabase
+            </button>
+            <button class="btn btn-ghost" onclick="clearUpload('survey')" id="btnClearSurv" style="display:none">
+              Clear
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Options -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><div class="card-title">⚙️ Upload Options</div></div>
+      <div class="card-body" style="display:flex;gap:24px;flex-wrap:wrap;align-items:center">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="optSkipDupes" checked style="width:16px;height:16px;cursor:pointer">
+          Skip duplicate Delivery IDs (recommended)
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="optClearFirst" style="width:16px;height:16px;cursor:pointer">
+          <span style="color:var(--red)">⚠ Clear existing data before upload</span>
+        </label>
+        <div style="font-size:11px;color:var(--textm);margin-left:auto">Batch size: 50 rows per request</div>
+      </div>
+    </div>
+
+    <!-- Upload log -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">📋 Upload Log</div>
+        <button class="btn btn-ghost" onclick="document.getElementById('uploadLog').innerHTML=''" style="font-size:11px;padding:4px 10px">Clear Log</button>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div class="upload-log" id="uploadLog">
+          <div class="log-line log-info">Ready to upload. Select a CSV file above to begin.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Format reminder -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-head"><div class="card-title">📐 Required CSV Column Names</div></div>
+      <div class="card-body">
+        <div class="grid2">
+          <div>
+            <div style="font-size:12px;font-weight:700;color:var(--blue);margin-bottom:8px">🚛 Delivery CSV Columns</div>
+            <div style="font-family:var(--mono);font-size:11px;color:var(--text2);line-height:2">
+              delivery_id · date · market · store<br>
+              dsp_name · driver_name · scheduled_time<br>
+              actual_time · on_time · completed<br>
+              root_cause · notes
+            </div>
+          </div>
+          <div>
+            <div style="font-size:12px;font-weight:700;color:var(--green);margin-bottom:8px">⭐ Survey CSV Columns</div>
+            <div style="font-family:var(--mono);font-size:11px;color:var(--text2);line-height:2">
+              delivery_ref · date · dsp_name · driver_name<br>
+              market · store · score · ltr_status<br>
+              comment · follow_up_required
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:12px;padding:10px;background:var(--yellowdim);border:1px solid var(--yellow);border-radius:var(--r);font-size:12px;color:var(--yellow)">
+          ⚠ Save each sheet as <strong>CSV UTF-8</strong> from Excel (File → Save As → CSV UTF-8). Date format must be <strong>YYYY-MM-DD</strong>. on_time and completed must be <strong>Yes</strong> or <strong>No</strong>.
+        </div>
+      </div>
+    </div>
+  </div>
+
 </main>
 
 <script>
+// Upload state
+const uploadState = { delivery: { rows:[], file:null }, survey: { rows:[], file:null } };
+
+// ── DRAG & DROP ──────────────────────────────────────────
+function dragOver(e, id){ e.preventDefault(); document.getElementById(id).classList.add('dragover'); }
+function dragLeave(id){ document.getElementById(id).classList.remove('dragover'); }
+function dropFile(e, type){
+  e.preventDefault();
+  const id = type==='delivery'?'dropDel':'dropSurv';
+  dragLeave(id);
+  const file = e.dataTransfer.files[0];
+  if(file && file.name.endsWith('.csv')){
+    processCSV(file, type);
+  } else {
+    showToast('Please drop a CSV file (.csv)', 'error');
+  }
+}
+
+function handleFile(input, type){
+  const file = input.files[0];
+  if(file) processCSV(file, type);
+}
+
+// ── PARSE CSV ────────────────────────────────────────────
+function parseCSV(text){
+  const lines = text.split('\n').filter(l=>l.trim());
+  if(lines.length < 2) return { headers:[], rows:[] };
+  const headers = lines[0].split(',').map(h=>h.trim().replace(/^"|"$/g,'').toLowerCase().replace(/\s+/g,'_').replace(/[*]/g,''));
+  const rows = [];
+  for(let i=1;i<lines.length;i++){
+    const vals = parseCSVLine(lines[i]);
+    if(vals.every(v=>!v.trim())) continue;
+    const obj = {};
+    headers.forEach((h,j)=>{ obj[h] = (vals[j]||'').trim().replace(/^"|"$/g,''); });
+    rows.push(obj);
+  }
+  return { headers, rows };
+}
+
+function parseCSVLine(line){
+  const result=[]; let cur=''; let inQ=false;
+  for(let i=0;i<line.length;i++){
+    if(line[i]==='"'){ inQ=!inQ; }
+    else if(line[i]===','&&!inQ){ result.push(cur); cur=''; }
+    else { cur+=line[i]; }
+  }
+  result.push(cur);
+  return result;
+}
+
+function processCSV(file, type){
+  const reader = new FileReader();
+  reader.onload = function(e){
+    const { headers, rows } = parseCSV(e.target.result);
+    uploadState[type].rows = rows;
+    uploadState[type].file = file;
+
+    const infoId = type==='delivery'?'delFileInfo':'survFileInfo';
+    const btnId = type==='delivery'?'btnUploadDel':'btnUploadSurv';
+    const clrId = type==='delivery'?'btnClearDel':'btnClearSurv';
+
+    document.getElementById(infoId).innerHTML = `
+      <div class="file-pill">
+        <span>📄</span>
+        <span class="file-pill-name">${file.name}</span>
+        <span class="file-pill-size">${rows.length} rows · ${(file.size/1024).toFixed(1)}KB</span>
+      </div>
+      <div style="font-size:11px;color:var(--text2);margin-top:6px">
+        Columns detected: <span style="font-family:var(--mono);color:var(--blue)">${headers.join(', ')}</span>
+      </div>`;
+    document.getElementById(btnId).style.display='inline-flex';
+    document.getElementById(clrId).style.display='inline-flex';
+    addLog(`📄 Loaded ${file.name} — ${rows.length} rows, ${headers.length} columns`, 'info');
+  };
+  reader.readAsText(file);
+}
+
+function clearUpload(type){
+  uploadState[type] = { rows:[], file:null };
+  const infoId = type==='delivery'?'delFileInfo':'survFileInfo';
+  const btnId = type==='delivery'?'btnUploadDel':'btnUploadSurv';
+  const clrId = type==='delivery'?'btnClearDel':'btnClearSurv';
+  const progId = type==='delivery'?'delProgress':'survProgress';
+  const fileId = type==='delivery'?'fileDel':'fileSurv';
+  document.getElementById(infoId).innerHTML='';
+  document.getElementById(btnId).style.display='none';
+  document.getElementById(clrId).style.display='none';
+  document.getElementById(progId).style.display='none';
+  document.getElementById(fileId).value='';
+}
+
+// ── UPLOAD TO SUPABASE ───────────────────────────────────
+async function startUpload(type){
+  const rows = uploadState[type].rows;
+  if(!rows.length){ showToast('No data loaded', 'error'); return; }
+
+  const skipDupes = document.getElementById('optSkipDupes').checked;
+  const clearFirst = document.getElementById('optClearFirst').checked;
+  const table = type==='delivery'?'deliveries':'surveys';
+  const progId = type==='delivery'?'delProgress':'survProgress';
+  const barId = type==='delivery'?'delBar':'survBar';
+  const countId = type==='delivery'?'delCount':'survCount';
+  const btnId = type==='delivery'?'btnUploadDel':'btnUploadSurv';
+
+  document.getElementById(btnId).disabled = true;
+  document.getElementById(progId).style.display='block';
+  addLog(`🚀 Starting ${type} upload — ${rows.length} rows`, 'info');
+
+  // Clear existing if requested
+  if(clearFirst){
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=neq.00000000-0000-0000-0000-000000000000`, {
+        method:'DELETE', headers:HEADERS
+      });
+      addLog(`🗑 Cleared existing ${table} data`, 'warn');
+    } catch(e){ addLog(`Error clearing: ${e.message}`, 'err'); }
+  }
+
+  // Transform rows
+  const transformed = rows.map(r => transformRow(r, type)).filter(r=>r!==null);
+  addLog(`✅ Validated ${transformed.length} rows (${rows.length - transformed.length} skipped/invalid)`, 'info');
+
+  // Batch upload
+  const BATCH = 50;
+  let uploaded = 0, errors = 0;
+
+  for(let i=0; i<transformed.length; i+=BATCH){
+    const batch = transformed.slice(i, i+BATCH);
+    const pct = Math.round((i/transformed.length)*100);
+    document.getElementById(barId).style.width = pct+'%';
+    document.getElementById(countId).textContent = `${i} / ${transformed.length}`;
+
+    try {
+      const prefer = skipDupes ? 'return=minimal,resolution=ignore-duplicates' : 'return=minimal';
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+        method:'POST',
+        headers:{ ...HEADERS, 'Prefer': prefer },
+        body: JSON.stringify(batch)
+      });
+      if(res.ok){
+        uploaded += batch.length;
+        addLog(`✅ Batch ${Math.floor(i/BATCH)+1}: uploaded ${batch.length} rows`, 'ok');
+      } else {
+        const err = await res.text();
+        errors += batch.length;
+        addLog(`❌ Batch ${Math.floor(i/BATCH)+1} error: ${err.slice(0,120)}`, 'err');
+      }
+    } catch(e){
+      errors += batch.length;
+      addLog(`❌ Network error: ${e.message}`, 'err');
+    }
+    await new Promise(r=>setTimeout(r,100));
+  }
+
+  document.getElementById(barId).style.width='100%';
+  document.getElementById(countId).textContent = `${uploaded} / ${transformed.length}`;
+  document.getElementById(btnId).disabled = false;
+
+  if(errors === 0){
+    addLog(`🎉 Upload complete! ${uploaded} ${type} records saved to Supabase`, 'ok');
+    showToast(`✅ ${uploaded} ${type} records uploaded!`, 'success');
+    setTimeout(()=>loadData(), 1500);
+  } else {
+    addLog(`⚠ Upload finished: ${uploaded} succeeded, ${errors} failed`, 'warn');
+    showToast(`${uploaded} uploaded, ${errors} errors`, 'error');
+  }
+}
+
+function transformRow(r, type){
+  try {
+    if(type==='delivery'){
+      if(!r.delivery_id || !r.date) return null;
+      return {
+        delivery_id: r.delivery_id,
+        date: formatDate(r.date),
+        market: r.market||'',
+        store: r.store||null,
+        dsp_name: r.dsp_name||'',
+        driver_name: r.driver_name||'',
+        scheduled_time: r.scheduled_time||null,
+        actual_time: r.actual_time||null,
+        on_time: parseYN(r.on_time),
+        completed: parseYN(r.completed),
+        root_cause: r.root_cause||null,
+        notes: r.notes||null
+      };
+    } else {
+      if(!r.date || !r.dsp_name) return null;
+      const score = parseInt(r.score);
+      const ltr = !isNaN(score) ? (score>=9?'Promoter':score>=7?'Passive':'Detractor') : (r.ltr_status||null);
+      return {
+        delivery_ref: r.delivery_ref||null,
+        date: formatDate(r.date),
+        dsp_name: r.dsp_name||'',
+        driver_name: r.driver_name||'',
+        market: r.market||null,
+        store: r.store||null,
+        score: isNaN(score)?null:score,
+        ltr_status: ltr,
+        comment: r.comment||null,
+        follow_up_required: parseYN(r.follow_up_required||r.follow_up)
+      };
+    }
+  } catch(e){ return null; }
+}
+
+function parseYN(v){
+  if(v===true||v===false) return v;
+  if(!v) return false;
+  return v.toString().toLowerCase().trim()==='yes'||v.toString().toLowerCase().trim()==='true';
+}
+
+function formatDate(d){
+  if(!d) return null;
+  // Handle MM/DD/YYYY → YYYY-MM-DD
+  if(d.includes('/')){
+    const parts = d.split('/');
+    if(parts.length===3) return `${parts[2].padStart(4,'20')}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`;
+  }
+  return d.slice(0,10);
+}
+
+function addLog(msg, type='info'){
+  const log = document.getElementById('uploadLog');
+  const line = document.createElement('div');
+  line.className = `log-line log-${type}`;
+  const time = new Date().toLocaleTimeString();
+  line.textContent = `[${time}] ${msg}`;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
 // ═══════════════════════════════════════════
 // SUPABASE CONFIG
 // ═══════════════════════════════════════════
