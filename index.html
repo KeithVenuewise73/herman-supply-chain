@@ -1,16 +1,274 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Lowe's KPI Dashboard</title>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { background: #060f1e; }
-    </style>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Herman Supply Chain Solutions | Logistics & Transportation Consulting</title>
+  <meta name="description" content="Herman Supply Chain Solutions provides logistics consulting, route optimization, operational cost audits, and supply chain intelligence to reduce costs and improve efficiency." />
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230B1D3A'/><text x='16' y='22' font-size='18' text-anchor='middle' fill='%2300A9B7'>H</text></svg>" />
+</head>
+<body>
+
+<!-- ======= NAVIGATION ======= -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-logo">
+      <div class="nav-logo-primary">Herman Supply Chain</div>
+      <div class="nav-logo-sub">Solutions &nbsp;·&nbsp; Est. 1994</div>
+    </a>
+    <div class="nav-links" id="navLinks">
+      <a href="index.html" class="active">Home</a>
+      <a href="about.html">About</a>
+      <a href="services.html">Services</a>
+      <a href="assessment.html" class="nav-cta">Free Assessment</a>
+      <a href="contact.html">Contact</a>
+    </div>
+    <button class="nav-hamburger" id="hamburger" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</nav>
+
+<!-- ======= HERO ======= -->
+<section class="hero">
+  <div class="hero-grid"></div>
+  <div class="hero-glow"></div>
+  <div class="hero-glow-2"></div>
+  <div class="hero-inner">
+    <div class="hero-content">
+      <div class="hero-eyebrow fade-up fade-up-1">Supply Chain Intelligence</div>
+      <h1 class="fade-up fade-up-2">
+        Reduce Transportation Costs.<br>
+        <em>Improve Service Levels.</em><br>
+        Increase Operational Efficiency.
+      </h1>
+      <p class="hero-sub fade-up fade-up-3">
+        Herman Supply Chain Solutions combines 30 years of logistics leadership with data-driven operational intelligence to identify savings, improve routing efficiency, recover lost revenue, and optimize supply chain performance.
+      </p>
+      <div class="hero-actions fade-up fade-up-4">
+        <a href="assessment.html" class="btn btn-primary">
+          ▶ Start Free Operational Assessment
+        </a>
+        <a href="services.html" class="btn btn-outline">Explore Services</a>
+      </div>
+    </div>
+    <div class="hero-card fade-up fade-up-3">
+      <div class="hero-card-title">Live Performance Benchmarks</div>
+      <div class="hero-stat">
+        <div class="hero-stat-value">$2.4M+</div>
+        <div class="hero-stat-label">Average Annual Savings Identified</div>
+        <span class="hero-stat-badge badge-green">Per engagement</span>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-value">18.3%</div>
+        <div class="hero-stat-label">Average Transportation Cost Reduction</div>
+        <span class="hero-stat-badge badge-blue">Year-over-year</span>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-value">97.1%</div>
+        <div class="hero-stat-label">Target On-Time Delivery Rate</div>
+        <span class="hero-stat-badge badge-green">Best-in-class</span>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-value">30 Yrs</div>
+        <div class="hero-stat-label">Logistics Leadership Experience</div>
+        <span class="hero-stat-badge badge-yellow">Senior expertise</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======= METRICS STRIP ======= -->
+<section class="metrics-strip">
+  <div class="metrics-strip-inner">
+    <div class="metric-item">
+      <div class="metric-value">200+</div>
+      <div class="metric-label">Operational Engagements</div>
+    </div>
+    <div class="metric-item">
+      <div class="metric-value">$180M+</div>
+      <div class="metric-label">Savings Recovered for Clients</div>
+    </div>
+    <div class="metric-item">
+      <div class="metric-value">30 Yrs</div>
+      <div class="metric-label">Industry Experience</div>
+    </div>
+    <div class="metric-item">
+      <div class="metric-value">98.2%</div>
+      <div class="metric-label">Client Retention Rate</div>
+    </div>
+  </div>
+</section>
+
+<!-- ======= SERVICES OVERVIEW ======= -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-label">What We Do</div>
+    <h2 class="section-title">End-to-End Supply Chain Optimization</h2>
+    <p class="section-sub">From route engineering to cost audits, we bring executive-level logistics intelligence to every engagement.</p>
+
+    <div class="services-grid">
+      <div class="service-card">
+        <div class="service-icon">🗺</div>
+        <h3>Routing Efficiency Analysis</h3>
+        <p>Forensic analysis of route structures, stop density, and geographic clustering to eliminate waste and reduce miles driven per revenue dollar.</p>
+      </div>
+      <div class="service-card">
+        <div class="service-icon">🔍</div>
+        <h3>Operational Cost Audits</h3>
+        <p>Line-by-line audit of transportation, fuel, labor, and overhead to identify where costs are hidden and where savings are achievable.</p>
+      </div>
+      <div class="service-card">
+        <div class="service-icon">💰</div>
+        <h3>Revenue Recovery Audits</h3>
+        <p>Systematic review of billing accuracy, accessorial charges, and missed revenue opportunities hidden within existing operations.</p>
+      </div>
+      <div class="service-card">
+        <div class="service-icon">👷</div>
+        <h3>Labor Optimization</h3>
+        <p>Driver schedule analysis, overtime reduction, contractor vs. employee cost modeling, and productivity benchmarking.</p>
+      </div>
+      <div class="service-card">
+        <div class="service-icon">📊</div>
+        <h3>KPI Dashboard Development</h3>
+        <p>Custom supply chain command center dashboards that give leadership real-time visibility into the metrics that matter most.</p>
+      </div>
+      <div class="service-card">
+        <div class="service-icon">🏭</div>
+        <h3>Supply Chain Command Center</h3>
+        <p>Full-spectrum consulting engagements that transform reactive logistics operations into proactive, data-driven supply chain enterprises.</p>
+      </div>
+    </div>
+
+    <div style="text-align:center; margin-top:48px;">
+      <a href="services.html" class="btn btn-navy">View All Services →</a>
+    </div>
+  </div>
+</section>
+
+<!-- ======= PROCESS ======= -->
+<section class="section" style="background:var(--gray-100); padding-top:80px; padding-bottom:80px;">
+  <div class="section-inner">
+    <div class="section-label">Our Approach</div>
+    <h2 class="section-title">A Proven Methodology</h2>
+    <p class="section-sub">Every engagement follows a structured process built over three decades of logistics leadership.</p>
+
+    <div class="process-steps">
+      <div class="process-step">
+        <div class="process-num">01 — ASSESS</div>
+        <h4>Operational Assessment</h4>
+        <p>We baseline your current state across cost, service, routing efficiency, and labor — establishing the data foundation for everything that follows.</p>
+      </div>
+      <div class="process-step">
+        <div class="process-num">02 — DIAGNOSE</div>
+        <h4>Gap & Risk Analysis</h4>
+        <p>We identify every gap between your current performance and industry benchmarks, quantifying the financial impact of each inefficiency.</p>
+      </div>
+      <div class="process-step">
+        <div class="process-num">03 — DESIGN</div>
+        <h4>Solution Architecture</h4>
+        <p>We build a tailored operational improvement roadmap with clear timelines, ROI projections, and accountable milestones.</p>
+      </div>
+      <div class="process-step">
+        <div class="process-num">04 — EXECUTE</div>
+        <h4>Implementation & KPI Tracking</h4>
+        <p>We drive implementation alongside your team and track results against baseline — ensuring every identified dollar of savings is captured.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======= TESTIMONIALS ======= -->
+<section class="section testimonials">
+  <div class="section-inner">
+    <div class="section-label">Client Results</div>
+    <h2 class="section-title">What Our Clients Say</h2>
+
+    <div class="testimonials-grid">
+      <div class="testimonial-card">
+        <div class="testimonial-quote">"</div>
+        <p>Herman Supply Chain Solutions identified $1.8 million in annual savings we didn't know existed. Their routing analysis alone reduced our transportation cost percentage from 28% to 19% in under six months.</p>
+        <div class="testimonial-author">
+          <strong>VP of Operations</strong>
+          <span>Regional Foodservice Distributor</span>
+        </div>
+      </div>
+      <div class="testimonial-card">
+        <div class="testimonial-quote">"</div>
+        <p>The operational assessment gave us a clear picture of where we stood and exactly what to do about it. Their team speaks logistics fluently — no learning curve, just results.</p>
+        <div class="testimonial-author">
+          <strong>Chief Supply Chain Officer</strong>
+          <span>Multi-State 3PL Provider</span>
+        </div>
+      </div>
+      <div class="testimonial-card">
+        <div class="testimonial-quote">"</div>
+        <p>After the engagement, our on-time rate climbed from 88% to 96.4%. The KPI command center they built transformed how our leadership team manages the business every single day.</p>
+        <div class="testimonial-author">
+          <strong>Director of Transportation</strong>
+          <span>Last-Mile Delivery Network</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======= CTA BAND ======= -->
+<section class="cta-band">
+  <div class="cta-band-inner">
+    <div class="section-label" style="justify-content:center; color:var(--teal-light);">
+      <span style="display:block; width:24px; height:1px; background:var(--teal-light); margin-right:10px;"></span>
+      Get Started Today
+    </div>
+    <h2>Find Out What Your Operation Is Really Worth</h2>
+    <p>Take our free 5-minute Operational Assessment and receive an instant executive analysis of your supply chain performance, risk profile, and savings potential.</p>
+    <div style="display:flex; gap:16px; justify-content:center; flex-wrap:wrap;">
+      <a href="assessment.html" class="btn btn-primary" style="font-size:1rem; padding:16px 36px;">Start Free Assessment →</a>
+      <a href="contact.html" class="btn btn-outline">Schedule a Call</a>
+    </div>
+  </div>
+</section>
+
+<!-- ======= FOOTER ======= -->
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-top">
+      <div class="footer-brand">
+        <div class="footer-logo-primary">Herman Supply Chain Solutions</div>
+        <div class="footer-logo-sub">Logistics Intelligence &nbsp;·&nbsp; Since 1994</div>
+        <p>Combining 30 years of logistics leadership with data-driven operational intelligence to reduce costs and optimize supply chain performance.</p>
+      </div>
+      <div class="footer-col">
+        <h5>Navigation</h5>
+        <a href="index.html">Home</a>
+        <a href="about.html">About Us</a>
+        <a href="services.html">Services</a>
+        <a href="assessment.html">Free Assessment</a>
+        <a href="contact.html">Contact</a>
+      </div>
+      <div class="footer-col">
+        <h5>Services</h5>
+        <a href="services.html">Route Efficiency Analysis</a>
+        <a href="services.html">Cost Audits</a>
+        <a href="services.html">Revenue Recovery</a>
+        <a href="services.html">Labor Optimization</a>
+        <a href="services.html">KPI Dashboards</a>
+      </div>
+      <div class="footer-col">
+        <h5>Contact</h5>
+        <a href="mailto:info@hermansupplychain.com">info@hermansupplychain.com</a>
+        <a href="tel:+18005551234">1-800-555-1234</a>
+        <a href="contact.html">Request Consultation</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <div class="footer-copy">© 2025 Herman Supply Chain Solutions. All rights reserved.</div>
+      <div class="footer-tagline">Version 1.0 &nbsp;·&nbsp; Data-Driven Logistics Intelligence</div>
+    </div>
+  </div>
+</footer>
+
+<script src="js/script.js"></script>
+</body>
 </html>
