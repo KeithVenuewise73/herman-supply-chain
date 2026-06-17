@@ -60,6 +60,10 @@ const safeDate = (v) => {
 };
 // Normalizes carrier names for matching: lowercase, strip punctuation, collapse spaces,
 // and standardize common entity suffixes (LLC/Inc/Corp) so "CF Sedano LLC" matches "CF Sedano".
+// NOTE: "&" is intentionally NOT stripped/collapsed — e.g. "A&M Trucking LLC" and
+// "A & M Trucking LLC" are confirmed to be two distinct real companies, not a spelling
+// inconsistency. Treating them as the same carrier would silently merge two different
+// businesses' data, which is worse than the original unmatched-filter symptom.
 const normalizeCarrier = (n) => {
   let s = String(n || "").trim().toLowerCase();
   s = s.replace(/[.,]/g, "");
@@ -134,9 +138,22 @@ const compositeScore = (row, useNeutral = false) => {
 
 // ─── Excel Parser ─────────────────────────────────────────────────────────
 // Converts a sheet_to_json-style row keyed by header into a lookup-by-fuzzy-name getter.
+// Looks up a column value by fuzzy header name. CRITICAL: tries an EXACT normalized
+// match first, across ALL candidates, before falling back to substring matching. This
+// matters because some sheets have multiple columns whose normalized names are
+// substrings of each other — e.g. "Carrier" and "Contractor Carrier" both normalize
+// such that a naive substring search for "carrier" matches "Contractor Carrier" first
+// (since it appears earlier in the column order), silently returning the wrong column.
+// Exact-match-first avoids that entire class of bug.
 const makeGetter = (r) => {
   const keys = Object.keys(r);
+  const normKeys = keys.map((k) => k.toLowerCase().replace(/[^a-z0-9]/g, ""));
   return (...candidates) => {
+    for (const c of candidates) {
+      const target = c.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const exactIdx = normKeys.indexOf(target);
+      if (exactIdx !== -1) return r[keys[exactIdx]];
+    }
     for (const c of candidates) {
       const target = c.toLowerCase().replace(/[^a-z0-9]/g, "");
       const k = keys.find((k) => k.toLowerCase().replace(/[^a-z0-9]/g, "").includes(target));
@@ -702,17 +719,14 @@ const UploadPage = ({ onLoad }) => {
 // ─── Driver / Carrier / Store / Detractor Pages ────────────────────────────
 const DriverRankings = ({ speRows, ltrRows, filters, setFilters, options, useNeutral }) => {
   const all = useMemo(() => buildDriverRows(speRows, ltrRows, useNeutral), [speRows, ltrRows, useNeutral]);
-  const carrierExistsInData = useMemo(() => new Set(all.map((r) => r.carrier)), [all]);
   const filtered = useMemo(() => all.filter((r) => {
-    // Guard: only filter by carrier if the selected value actually exists in the parsed
-    // SPE driver data. Otherwise (e.g. carrier list differs slightly from SP sheet), show all.
-    if (filters.carrier && carrierExistsInData.has(filters.carrier) && r.carrier !== filters.carrier) return false;
+    if (filters.carrier && normalizeCarrier(r.carrier) !== normalizeCarrier(filters.carrier)) return false;
     if (filters.weekEnding && r.weekEnding !== filters.weekEnding) return false;
     if (filters.region && r.region !== filters.region) return false;
     if (filters.district && r.district !== filters.district) return false;
     if (filters.search) { const s = filters.search.toLowerCase(); if (!r.name.toLowerCase().includes(s) && !r.carrier.toLowerCase().includes(s)) return false; }
     return true;
-  }), [all, filters, carrierExistsInData]);
+  }), [all, filters]);
   const { sorted, sortCol, sortDir, sort } = useSortable(filtered, "composite");
   const th = (col, label) => <Th col={col} label={label} sortCol={sortCol} sortDir={sortDir} onSort={sort} />;
   return (
@@ -768,9 +782,8 @@ const DriverRankings = ({ speRows, ltrRows, filters, setFilters, options, useNeu
 const CarrierRankings = ({ spRows, ltrRows, filters, setFilters, options, useNeutral }) => {
   const all = useMemo(() => buildCarrierRows(spRows, ltrRows, useNeutral), [spRows, ltrRows, useNeutral]);
   const filtered = useMemo(() => all.filter((r) => {
-    if (filters.carrier && r.carrier !== filters.carrier) return false;
+    if (filters.carrier && normalizeCarrier(r.carrier) !== normalizeCarrier(filters.carrier)) return false;
     if (filters.region && r.region !== filters.region) return false;
-    if (filters.district && r.district !== filters.district) return false;
     if (filters.search && !r.carrier.toLowerCase().includes(filters.search.toLowerCase())) return false;
     return true;
   }), [all, filters]);
@@ -782,7 +795,18 @@ const CarrierRankings = ({ spRows, ltrRows, filters, setFilters, options, useNeu
         <h2 style={{ color: "#f1f5f9", fontSize: 20, fontWeight: 700 }}>Contractor / Carrier Rankings</h2>
         <button onClick={() => exportCSV(sorted, "carrier-rankings.csv")} style={exportBtn}>Export CSV</button>
       </div>
-      <FiltersBar filters={filters} setFilters={setFilters} options={options} />
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 20, alignItems: "center" }}>
+        <input placeholder="🔍 Search…" value={filters.search || ""} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))} style={{ background: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: 6, padding: "6px 12px", fontSize: 13, minWidth: 180 }} />
+        <select value={filters.carrier || ""} onChange={(e) => setFilters((f) => ({ ...f, carrier: e.target.value }))} style={{ background: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}>
+          <option value="">All Carriers</option>
+          {(options.carrier || []).map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <select value={filters.region || ""} onChange={(e) => setFilters((f) => ({ ...f, region: e.target.value }))} style={{ background: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}>
+          <option value="">All Regions</option>
+          {(options.region || []).map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <button onClick={() => setFilters((f) => ({ search: "", carrier: "", region: "" }))} style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 6, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>Clear</button>
+      </div>
       <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid #1e293b" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead><tr>
@@ -955,7 +979,10 @@ const DetractorReview = ({ ltrRows, filters, setFilters, options }) => {
   const [detFilter, setDetFilter] = useState("");
   const [ltrFilter, setLtrFilter] = useState("");
   const filtered = useMemo(() => ltrRows.filter((r) => {
-    if (filters.carrier && r.carrier !== filters.carrier) return false;
+    // Normalized comparison: the LTR file and KPI file sometimes spell the same carrier
+    // slightly differently (e.g. "A&M Trucking LLC" vs "A & M Trucking LLC"), so an exact
+    // string match against the dropdown selection can silently return zero rows.
+    if (filters.carrier && normalizeCarrier(r.carrier) !== normalizeCarrier(filters.carrier)) return false;
     if (filters.search) { const s = filters.search.toLowerCase(); if (!r.store.name.toLowerCase().includes(s) && !r.contractorCarrier.toLowerCase().includes(s)) return false; }
     if (detFilter && r.detractor !== detFilter) return false;
     if (ltrFilter && String(r.ltr) !== ltrFilter) return false;
@@ -1151,9 +1178,17 @@ function App() {
 
   const options = useMemo(() => {
     if (!data) return {};
+    // Dedupe carrier names by normalized identity so near-duplicate spellings from the
+    // two source files (e.g. "A&M Trucking LLC" vs "A & M Trucking LLC") don't show up
+    // as two separate, confusing dropdown entries. Prefer the KPI/SP file's spelling as
+    // the canonical display label, since that's what the rankings tables already use;
+    // fall back to the LTR file's spelling for carriers that only appear there.
+    const carrierByNorm = {};
+    data.spRows.forEach((r) => { if (r.carrier) carrierByNorm[normalizeCarrier(r.carrier)] = r.carrier; });
+    data.ltrRows.forEach((r) => { const n = normalizeCarrier(r.carrier); if (r.carrier && !carrierByNorm[n]) carrierByNorm[n] = r.carrier; });
     return {
       weekEnding: [...new Set([...data.speRows.map((r) => r.weekEnding), ...data.spRows.map((r) => r.weekEnding)])].filter(Boolean).sort(),
-      carrier: [...new Set([...data.ltrRows.map((r) => r.carrier), ...data.spRows.map((r) => r.carrier)])].filter(Boolean).sort(),
+      carrier: Object.values(carrierByNorm).sort(),
       region: [...new Set([...data.speRows.map((r) => r.region), ...data.spRows.map((r) => r.region)])].filter(Boolean).sort(),
       district: [...new Set([...data.speRows.map((r) => r.district), ...data.spRows.map((r) => r.district)])].filter(Boolean).sort(),
       market: [...new Set(data.ltrRows.map((r) => r.market))].filter(Boolean).sort(),
