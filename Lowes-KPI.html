@@ -507,22 +507,38 @@ const buildStoreRows = (ltrRows) => {
   const map = {};
   ltrRows.forEach((r) => {
     const key = r.store.number || r.store.name;
-    if (!map[key]) map[key] = { store: r.store, ltrResponses: [], detractors: [], comments: [] };
+    if (!map[key]) map[key] = { store: r.store, market: r.market || "(Unknown)", ltrResponses: [], detractors: [], comments: [] };
     map[key].ltrResponses.push(r.ltr);
     if (r.detractor) map[key].detractors.push(r.detractor);
     if (r.improvementComment) map[key].comments.push(r.improvementComment);
   });
-  return Object.values(map).map((r) => {
+  const rows = Object.values(map).map((r) => {
     const ltr = calcLTR(r.ltrResponses);
     const detCounts = {};
     r.detractors.forEach((d) => { detCounts[d] = (detCounts[d] || 0) + 1; });
     const topDet = Object.entries(detCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
     return {
-      storeNum: r.store.number, storeName: r.store.name, ltrTotal: ltr.total, ltrCount910: ltr.count910,
+      storeNum: r.store.number, storeName: r.store.name, market: r.market, ltrTotal: ltr.total, ltrCount910: ltr.count910,
       ltrCount8: ltr.count8, ltrCount07: ltr.count07, ltrStrict: ltr.strict, ltrNeutral: ltr.neutral,
       detractorCount: r.detractors.length, topDetractor: topDet, lowSample: ltr.total < 5, comments: r.comments,
     };
-  }).sort((a, b) => (b.ltrStrict || 0) - (a.ltrStrict || 0)).map((r, i) => ({ ...r, rank: i + 1 }));
+  });
+  // Fleet-wide rank: position among ALL stores regardless of market.
+  const fleetRanked = [...rows].sort((a, b) => (b.ltrStrict ?? -1) - (a.ltrStrict ?? -1));
+  fleetRanked.forEach((r, i) => { r.fleetRank = i + 1; });
+  // Market rank: position among only the stores sharing the same market.
+  const byMarket = {};
+  rows.forEach((r) => { (byMarket[r.market] = byMarket[r.market] || []).push(r); });
+  Object.values(byMarket).forEach((group) => {
+    group.sort((a, b) => (b.ltrStrict ?? -1) - (a.ltrStrict ?? -1));
+    group.forEach((r, i) => {
+      r.marketRank = i + 1;
+      r.marketStoreCount = group.length;
+    });
+  });
+  // Default sort/display order mirrors fleet rank; `rank` kept for backward compatibility
+  // with sort/export code elsewhere that expects a generic `rank` field.
+  return fleetRanked.map((r) => ({ ...r, rank: r.fleetRank }));
 };
 // Market Rankings: LTR-survey-only ranking (Strict/Neutral LTR, response counts, top
 // detractor category) grouped by the "Market" field from the LTR file. Market is not
@@ -772,7 +788,7 @@ const CarrierRankings = ({ spRows, ltrRows, filters, setFilters, options, useNeu
           <thead><tr>
             {th("rank", "#")}{th("carrier", "Carrier")}{th("routes", "Routes")}{th("plannedStops", "Planned")}
             {th("actualStops", "Actual")}{th("completion", "Compl%")}{th("onTimeInWindow", "OT Win%")}{th("onTime", "OT%")}
-            {th("redeliveryPct", "Redel%")}{th("surveyPct", "Survey%")}{th("positivePct", "Pos Survey%")}{th("negativePct", "Neg Survey%")}
+            {th("surveyPct", "Survey%")}{th("positivePct", "Pos Survey%")}{th("negativePct", "Neg Survey%")}
             {th("ltrTotal", "LTR#")}{th("ltrCount910", "9-10")}{th("ltrCount8", "8")}
             {th("ltrCount07", "0-7")}{th("ltrStrict", "Strict LTR")}{th("ltrNeutral", "Neutral LTR")}{th("composite", "Composite")}
           </tr></thead>
@@ -787,7 +803,6 @@ const CarrierRankings = ({ spRows, ltrRows, filters, setFilters, options, useNeu
                 <td style={{ ...td, color: colorForScore(r.completion) }}>{r.completion !== null ? r.completion.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: colorForScore(r.onTimeInWindow) }}>{r.onTimeInWindow !== null ? r.onTimeInWindow.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: colorForScore(r.onTime) }}>{r.onTime !== null ? r.onTime.toFixed(1) + "%" : "—"}</td>
-                <td style={{ ...td, color: (r.redeliveryPct || 0) > 10 ? "#ef4444" : "#94a3b8" }}>{r.redeliveryPct !== null ? r.redeliveryPct.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: "#94a3b8" }}>{r.surveyPct !== null ? r.surveyPct.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: "#22c55e" }}>{r.positivePct !== null ? r.positivePct.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: "#ef4444" }}>{r.negativePct !== null ? r.negativePct.toFixed(1) + "%" : "—"}</td>
@@ -812,10 +827,14 @@ const StoreRankings = ({ ltrRows, filters, setFilters, options }) => {
   const [commentStore, setCommentStore] = useState(null);
   const all = useMemo(() => buildStoreRows(ltrRows), [ltrRows]);
   const filtered = useMemo(() => all.filter((r) => {
+    if (filters.market && r.market !== filters.market) return false;
     if (filters.search) { const s = filters.search.toLowerCase(); if (!r.storeNum.includes(s) && !r.storeName.toLowerCase().includes(s)) return false; }
     return true;
   }), [all, filters]);
-  const { sorted, sortCol, sortDir, sort } = useSortable(filtered, "ltrStrict");
+  // When a market is selected, default the sortable view to rank within that market
+  // rather than fleet-wide, since that's the comparison the filter implies.
+  const sortDefault = filters.market ? "marketRank" : "fleetRank";
+  const { sorted, sortCol, sortDir, sort } = useSortable(filtered, sortDefault);
   const th = (col, label) => <Th col={col} label={label} sortCol={sortCol} sortDir={sortDir} onSort={sort} />;
   return (
     <div>
@@ -823,11 +842,23 @@ const StoreRankings = ({ ltrRows, filters, setFilters, options }) => {
         <h2 style={{ color: "#f1f5f9", fontSize: 20, fontWeight: 700 }}>Store Rankings</h2>
         <button onClick={() => exportCSV(sorted.map(({ comments, ...r }) => r), "store-rankings.csv")} style={exportBtn}>Export CSV</button>
       </div>
-      <FiltersBar filters={filters} setFilters={setFilters} options={options} />
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 20, alignItems: "center" }}>
+        <input placeholder="🔍 Search store…" value={filters.search || ""} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))} style={{ background: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: 6, padding: "6px 12px", fontSize: 13, minWidth: 180 }} />
+        <select value={filters.market || ""} onChange={(e) => setFilters((f) => ({ ...f, market: e.target.value }))} style={{ background: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}>
+          <option value="">All Markets</option>
+          {(options.market || []).map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <button onClick={() => setFilters({})} style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 6, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>Clear</button>
+      </div>
+      {filters.market && (
+        <div style={{ color: "#64748b", fontSize: 12, marginBottom: 12 }}>
+          Showing stores in Market {filters.market} — "Market Rank" reflects standing within this market only; "Fleet Rank" reflects standing across all {all.length} stores.
+        </div>
+      )}
       <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid #1e293b" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead><tr>
-            {th("rank", "#")}{th("storeNum", "Store #")}{th("storeName", "Store Name")}{th("ltrTotal", "LTR#")}
+            {th("fleetRank", "Fleet Rank")}{th("marketRank", "Market Rank")}{th("market", "Market")}{th("storeNum", "Store #")}{th("storeName", "Store Name")}{th("ltrTotal", "LTR#")}
             {th("ltrCount910", "9-10")}{th("ltrCount8", "8")}{th("ltrCount07", "0-7")}{th("ltrStrict", "Strict LTR")}
             {th("ltrNeutral", "Neutral LTR")}{th("detractorCount", "Detractors")}{th("topDetractor", "Top Issue")}
             <th style={thStyle}>Comments</th>
@@ -835,7 +866,9 @@ const StoreRankings = ({ ltrRows, filters, setFilters, options }) => {
           <tbody>
             {sorted.map((r, i) => (
               <tr key={i} style={{ background: i % 2 === 0 ? "#0f172a" : "#111827", borderBottom: "1px solid #1e293b" }}>
-                <td style={td}><span style={{ color: "#64748b" }}>#{r.rank}</span></td>
+                <td style={td}><span style={{ color: "#64748b" }}>#{r.fleetRank}</span></td>
+                <td style={td}><span style={{ color: "#38bdf8", fontWeight: 600 }}>#{r.marketRank}</span><span style={{ color: "#475569", fontSize: 11 }}> /{r.marketStoreCount}</span></td>
+                <td style={td}><span style={{ color: "#94a3b8" }}>{r.market}</span></td>
                 <td style={td}><span style={{ color: "#38bdf8", fontWeight: 700 }}>{r.storeNum || "—"}</span></td>
                 <td style={td}><div style={{ color: "#f1f5f9" }}>{r.storeName}</div>{r.lowSample && <Badge color="#f59e0b">Low Sample</Badge>}</td>
                 <td style={td}>{r.ltrTotal}</td>
@@ -852,6 +885,7 @@ const StoreRankings = ({ ltrRows, filters, setFilters, options }) => {
           </tbody>
         </table>
       </div>
+      <div style={{ color: "#475569", fontSize: 12, marginTop: 8 }}>{sorted.length} stores shown{filters.market ? ` (Market ${filters.market})` : ""}</div>
       {commentStore && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ background: "#1e293b", borderRadius: 12, padding: 28, maxWidth: 600, width: "90%", maxHeight: "80vh", overflowY: "auto" }}>
@@ -1122,6 +1156,7 @@ function App() {
       carrier: [...new Set([...data.ltrRows.map((r) => r.carrier), ...data.spRows.map((r) => r.carrier)])].filter(Boolean).sort(),
       region: [...new Set([...data.speRows.map((r) => r.region), ...data.spRows.map((r) => r.region)])].filter(Boolean).sort(),
       district: [...new Set([...data.speRows.map((r) => r.district), ...data.spRows.map((r) => r.district)])].filter(Boolean).sort(),
+      market: [...new Set(data.ltrRows.map((r) => r.market))].filter(Boolean).sort(),
     };
   }, [data]);
 
