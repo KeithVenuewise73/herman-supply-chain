@@ -106,13 +106,30 @@ const calcLTR = (responses) => {
   const neutral = denomNeutral === 0 ? null : (count910 / denomNeutral) * 100;
   return { strict, neutral, count910, count8, count07, total };
 };
+// Survey-to-delivery metrics: what % of completed deliveries (Actual Stops) generated
+// a survey response at all, and what % generated a positive (9-10) vs negative (0-7) one.
+// Denominator is Actual Stops (completed deliveries), since that's the only delivery-volume
+// figure in the KPI file; there's no separate "survey-eligible deliveries" column.
+const calcSurveyRates = (ltrResponses, actualStops) => {
+  if (!actualStops || actualStops <= 0) return { surveyPct: null, positivePct: null, negativePct: null };
+  const total = ltrResponses.length;
+  const positive = ltrResponses.filter((r) => r >= 9).length;
+  const negative = ltrResponses.filter((r) => r <= 7).length;
+  return {
+    surveyPct: (total / actualStops) * 100,
+    positivePct: (positive / actualStops) * 100,
+    negativePct: (negative / actualStops) * 100,
+  };
+};
+// Composite = Completion(30%) + On-Time In Window(30%) + LTR(40%).
+// On-Time % and Redelivery % are excluded from the formula — Redelivery % is
+// consistently 0 across this data source and carries no signal, and On-Time %
+// was dropped per requirement; both remain visible as informational columns only.
 const compositeScore = (row, useNeutral = false) => {
   const comp = toNum(row.completion) ?? 0;
   const otiw = toNum(row.onTimeInWindow) ?? 0;
-  const ot = toNum(row.onTime) ?? 0;
   const ltr = useNeutral ? (row.ltrNeutral ?? 0) : (row.ltrStrict ?? 0);
-  const redel = toNum(row.redeliveryPct) ?? 0;
-  return comp * 0.25 + otiw * 0.25 + ot * 0.2 + ltr * 0.2 - redel * 0.1;
+  return comp * 0.3 + otiw * 0.3 + ltr * 0.4;
 };
 
 // ─── Excel Parser ─────────────────────────────────────────────────────────
@@ -206,12 +223,33 @@ const parseFiles = (kpiFile, ltrFile) => {
   const ltrSheet = wb2.Sheets["LTR Data"] || wb2.Sheets[wb2.SheetNames[0]];
   const ltrRaw = ltrSheet ? XLSX.utils.sheet_to_json(ltrSheet, { defval: "", raw: false }) : [];
 
+  // Some source rows have a corrupted Market value: Excel has misread what should be a
+  // plain numeric market code (e.g. "1251") as a date, producing strings like "6/4/03 0:00".
+  // Real market codes are short digit strings with no "/" or ":". Build a store -> market
+  // lookup from rows where Market looks valid, then use it to recover the corrupted ones.
+  const looksLikeDate = (v) => /[\/:]/.test(String(v));
+  const storeToMarket = {};
+  ltrRaw.forEach((r) => {
+    const get = makeGetter(r);
+    const m = String(get("market") || "").trim();
+    const storeRaw = String(get("store") || "").trim();
+    if (m && storeRaw && !looksLikeDate(m) && !storeToMarket[storeRaw]) storeToMarket[storeRaw] = m;
+  });
+
+  let marketsRecovered = 0;
   const ltrRows = ltrRaw.map((r) => {
     const get = makeGetter(r);
     const ltrVal = toNum(get("likelihoodtorecommend", "ltr", "likelihood"));
     const store = parseStoreName(get("store"));
+    const storeRaw = String(get("store") || "").trim();
+    let market = String(get("market") || "").trim();
+    if (market && looksLikeDate(market)) {
+      const recovered = storeToMarket[storeRaw];
+      if (recovered) { market = recovered; marketsRecovered++; }
+    }
     return {
       store, ltr: ltrVal,
+      market,
       // LTR file: "Contractor Carrier" = driver/SPE name, "Carrier" = contractor/carrier name.
       contractorCarrier: String(get("contractorcarrier") || "").trim(),
       carrier: String(get("carrier") || "").trim(),
@@ -233,6 +271,7 @@ const parseFiles = (kpiFile, ltrFile) => {
       uniqueCarriersSP: [...new Set(spRows.map((r) => r.carrier).filter(Boolean))],
       uniqueCarriersSPE: [...new Set(speRows.map((r) => r.carrier).filter(Boolean))],
       uniqueDriversSPE: [...new Set(speRows.map((r) => r.speName).filter(Boolean))],
+      marketsRecovered,
     },
   };
 };
@@ -247,7 +286,7 @@ const syncToSupabase = async (spRows, speRows, ltrRows, onProgress) => {
   onProgress("Uploading LTR data...");
   const ltrBatch = ltrRows.map((r) => ({
     store_number: r.store.number, store_name: r.store.name, ltr_score: r.ltr,
-    contractor_carrier: r.contractorCarrier, carrier: r.carrier, detractor: r.detractor,
+    market: r.market, contractor_carrier: r.contractorCarrier, carrier: r.carrier, detractor: r.detractor,
     delivery_date: r.deliveryDate, improvement_comment: r.improvementComment,
     follow_up_comment: r.followUpComment,
   }));
@@ -282,7 +321,7 @@ const loadFromSupabase = async () => {
   ]);
   const ltrRows = (ltrRes.data || []).map((r) => ({
     store: { number: r.store_number || "", name: r.store_name || "" }, ltr: r.ltr_score,
-    contractorCarrier: r.contractor_carrier || "", carrier: r.carrier || "", detractor: r.detractor || "",
+    market: r.market || "", contractorCarrier: r.contractor_carrier || "", carrier: r.carrier || "", detractor: r.detractor || "",
     deliveryDate: r.delivery_date || "", improvementComment: r.improvement_comment || "",
     followUpComment: r.follow_up_comment || "",
   }));
@@ -416,12 +455,14 @@ const buildDriverRows = (speRows, ltrRows, useNeutral) => {
     const r = map[key];
     const avg = (f) => r["_cnt_" + f] ? r["_sum_" + f] / r["_cnt_" + f] : null;
     const ltr = calcLTR(r.ltrResponses);
+    const surveyRates = calcSurveyRates(r.ltrResponses, r.actualStops);
     const row = {
       name: r.speName, carrier: r.carrier, region: r.region, district: r.district, weekEnding: r.weekEnding,
       routes: r.routes, plannedStops: r.plannedStops, actualStops: r.actualStops, completion: avg("completion"),
       onTimeInWindow: avg("onTimeInWindow"), onTime: avg("onTime"), redeliveryPct: avg("redeliveryPct"),
       ltrTotal: ltr.total, ltrCount910: ltr.count910, ltrCount8: ltr.count8, ltrCount07: ltr.count07,
       ltrStrict: ltr.strict, ltrNeutral: ltr.neutral, lowSample: ltr.total > 0 && ltr.total < 5,
+      surveyPct: surveyRates.surveyPct, positivePct: surveyRates.positivePct, negativePct: surveyRates.negativePct,
     };
     // Composite still calculates from KPI metrics even with zero LTR responses:
     // missing LTR is treated as neutral (0 contribution) rather than excluding the row.
@@ -449,12 +490,14 @@ const buildCarrierRows = (spRows, ltrRows, useNeutral) => {
     const r = map[key];
     const avg = (f) => r["_cnt_" + f] ? r["_sum_" + f] / r["_cnt_" + f] : null;
     const ltr = calcLTR(r.ltrResponses);
+    const surveyRates = calcSurveyRates(r.ltrResponses, r.actualStops);
     const row = {
       carrier: r.carrier, region: r.region, district: r.district, weekEnding: r.weekEnding,
       routes: r.routes, plannedStops: r.plannedStops, actualStops: r.actualStops, completion: avg("completion"),
       onTimeInWindow: avg("onTimeInWindow"), onTime: avg("onTime"), redeliveryPct: avg("redeliveryPct"),
       ltrTotal: ltr.total, ltrCount910: ltr.count910, ltrCount8: ltr.count8, ltrCount07: ltr.count07,
       ltrStrict: ltr.strict, ltrNeutral: ltr.neutral, lowSample: ltr.total > 0 && ltr.total < 5,
+      surveyPct: surveyRates.surveyPct, positivePct: surveyRates.positivePct, negativePct: surveyRates.negativePct,
     };
     row.composite = compositeScore(row, useNeutral);
     return row;
@@ -480,6 +523,32 @@ const buildStoreRows = (ltrRows) => {
       detractorCount: r.detractors.length, topDetractor: topDet, lowSample: ltr.total < 5, comments: r.comments,
     };
   }).sort((a, b) => (b.ltrStrict || 0) - (a.ltrStrict || 0)).map((r, i) => ({ ...r, rank: i + 1 }));
+};
+// Market Rankings: LTR-survey-only ranking (Strict/Neutral LTR, response counts, top
+// detractor category) grouped by the "Market" field from the LTR file. Market is not
+// present in the KPI file, so no Completion%/On-Time%/Composite is available here.
+const buildMarketRows = (ltrRows) => {
+  const map = {};
+  const order = [];
+  ltrRows.forEach((r) => {
+    const key = r.market || "(Unknown)";
+    if (!map[key]) { map[key] = { market: key, ltrResponses: [], detractors: [], storeSet: new Set() }; order.push(key); }
+    map[key].ltrResponses.push(r.ltr);
+    if (r.detractor) map[key].detractors.push(r.detractor);
+    if (r.store.number || r.store.name) map[key].storeSet.add(r.store.number || r.store.name);
+  });
+  return order.map((key) => {
+    const r = map[key];
+    const ltr = calcLTR(r.ltrResponses);
+    const detCounts = {};
+    r.detractors.forEach((d) => { detCounts[d] = (detCounts[d] || 0) + 1; });
+    const topDet = Object.entries(detCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
+    return {
+      market: r.market, storeCount: r.storeSet.size, ltrTotal: ltr.total, ltrCount910: ltr.count910,
+      ltrCount8: ltr.count8, ltrCount07: ltr.count07, ltrStrict: ltr.strict, ltrNeutral: ltr.neutral,
+      detractorCount: r.detractors.length, topDetractor: topDet, lowSample: ltr.total > 0 && ltr.total < 5,
+    };
+  }).sort((a, b) => (b.ltrStrict ?? -1) - (a.ltrStrict ?? -1)).map((r, i) => ({ ...r, rank: i + 1 }));
 };
 
 // ─── Upload Page ──────────────────────────────────────────────────────────
@@ -522,6 +591,7 @@ const UploadPage = ({ onLoad }) => {
         uniqueCarriersSPE: data.debug.uniqueCarriersSPE.length,
         uniqueDriversSPE: data.debug.uniqueDriversSPE.length,
         matchedDriverLTR, unmatchedDriverLTR,
+        marketsRecovered: data.debug.marketsRecovered,
       });
 
       setProgress("Syncing to Supabase...");
@@ -590,6 +660,7 @@ const UploadPage = ({ onLoad }) => {
               ["Unique drivers (SPE)", debugStats.uniqueDriversSPE, "#fb923c"],
               ["Matched driver LTR rows", debugStats.matchedDriverLTR, "#22c55e"],
               ["Unmatched driver LTR rows", debugStats.unmatchedDriverLTR, debugStats.unmatchedDriverLTR > 0 ? "#ef4444" : "#22c55e"],
+              ["Markets auto-recovered", debugStats.marketsRecovered, debugStats.marketsRecovered > 0 ? "#f59e0b" : "#22c55e"],
             ].map(([label, value, color]) => (
               <div key={label} style={{ background: "#0f172a", border: `1px solid ${color}40`, borderRadius: 8, padding: "10px 14px" }}>
                 <div style={{ color: "#64748b", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{label}</div>
@@ -602,6 +673,9 @@ const UploadPage = ({ onLoad }) => {
           )}
           {debugStats.unmatchedDriverLTR > 0 && (
             <div style={{ marginTop: 6, color: "#64748b", fontSize: 12 }}>Unmatched LTR rows are usually drivers who left, name variants, or "Unknown" placeholders — not necessarily a bug.</div>
+          )}
+          {debugStats.marketsRecovered > 0 && (
+            <div style={{ marginTop: 6, color: "#64748b", fontSize: 12 }}>{debugStats.marketsRecovered} row(s) had a corrupted Market value (Excel misread it as a date) and were auto-recovered by matching the store to its market elsewhere in the file.</div>
           )}
         </div>
       )}
@@ -638,6 +712,7 @@ const DriverRankings = ({ speRows, ltrRows, filters, setFilters, options, useNeu
             {th("rank", "#")}{th("name", "Driver/SPE")}{th("carrier", "Carrier")}{th("routes", "Routes")}
             {th("plannedStops", "Planned")}{th("actualStops", "Actual")}{th("completion", "Compl%")}
             {th("onTimeInWindow", "OT Win%")}{th("onTime", "OT%")}{th("redeliveryPct", "Redel%")}
+            {th("surveyPct", "Survey%")}{th("positivePct", "Pos Survey%")}{th("negativePct", "Neg Survey%")}
             {th("ltrTotal", "LTR#")}{th("ltrCount910", "9-10")}{th("ltrCount8", "8")}{th("ltrCount07", "0-7")}
             {th("ltrStrict", "Strict LTR")}{th("ltrNeutral", "Neutral LTR")}{th("composite", "Composite")}
           </tr></thead>
@@ -654,6 +729,9 @@ const DriverRankings = ({ speRows, ltrRows, filters, setFilters, options, useNeu
                 <td style={{ ...td, color: colorForScore(r.onTimeInWindow) }}>{r.onTimeInWindow !== null ? r.onTimeInWindow.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: colorForScore(r.onTime) }}>{r.onTime !== null ? r.onTime.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: (r.redeliveryPct || 0) > 10 ? "#ef4444" : "#94a3b8" }}>{r.redeliveryPct !== null ? r.redeliveryPct.toFixed(1) + "%" : "—"}</td>
+                <td style={{ ...td, color: "#94a3b8" }}>{r.surveyPct !== null ? r.surveyPct.toFixed(1) + "%" : "—"}</td>
+                <td style={{ ...td, color: "#22c55e" }}>{r.positivePct !== null ? r.positivePct.toFixed(1) + "%" : "—"}</td>
+                <td style={{ ...td, color: "#ef4444" }}>{r.negativePct !== null ? r.negativePct.toFixed(1) + "%" : "—"}</td>
                 <td style={td}>{r.ltrTotal}</td>
                 <td style={{ ...td, color: "#22c55e" }}>{r.ltrCount910}</td>
                 <td style={{ ...td, color: "#eab308" }}>{r.ltrCount8}</td>
@@ -694,7 +772,8 @@ const CarrierRankings = ({ spRows, ltrRows, filters, setFilters, options, useNeu
           <thead><tr>
             {th("rank", "#")}{th("carrier", "Carrier")}{th("routes", "Routes")}{th("plannedStops", "Planned")}
             {th("actualStops", "Actual")}{th("completion", "Compl%")}{th("onTimeInWindow", "OT Win%")}{th("onTime", "OT%")}
-            {th("redeliveryPct", "Redel%")}{th("ltrTotal", "LTR#")}{th("ltrCount910", "9-10")}{th("ltrCount8", "8")}
+            {th("redeliveryPct", "Redel%")}{th("surveyPct", "Survey%")}{th("positivePct", "Pos Survey%")}{th("negativePct", "Neg Survey%")}
+            {th("ltrTotal", "LTR#")}{th("ltrCount910", "9-10")}{th("ltrCount8", "8")}
             {th("ltrCount07", "0-7")}{th("ltrStrict", "Strict LTR")}{th("ltrNeutral", "Neutral LTR")}{th("composite", "Composite")}
           </tr></thead>
           <tbody>
@@ -709,6 +788,9 @@ const CarrierRankings = ({ spRows, ltrRows, filters, setFilters, options, useNeu
                 <td style={{ ...td, color: colorForScore(r.onTimeInWindow) }}>{r.onTimeInWindow !== null ? r.onTimeInWindow.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: colorForScore(r.onTime) }}>{r.onTime !== null ? r.onTime.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: (r.redeliveryPct || 0) > 10 ? "#ef4444" : "#94a3b8" }}>{r.redeliveryPct !== null ? r.redeliveryPct.toFixed(1) + "%" : "—"}</td>
+                <td style={{ ...td, color: "#94a3b8" }}>{r.surveyPct !== null ? r.surveyPct.toFixed(1) + "%" : "—"}</td>
+                <td style={{ ...td, color: "#22c55e" }}>{r.positivePct !== null ? r.positivePct.toFixed(1) + "%" : "—"}</td>
+                <td style={{ ...td, color: "#ef4444" }}>{r.negativePct !== null ? r.negativePct.toFixed(1) + "%" : "—"}</td>
                 <td style={td}>{r.ltrTotal}</td>
                 <td style={{ ...td, color: "#22c55e" }}>{r.ltrCount910}</td>
                 <td style={{ ...td, color: "#eab308" }}>{r.ltrCount8}</td>
@@ -785,6 +867,56 @@ const StoreRankings = ({ ltrRows, filters, setFilters, options }) => {
   );
 };
 
+const MarketRankings = ({ ltrRows, filters, setFilters }) => {
+  const all = useMemo(() => buildMarketRows(ltrRows), [ltrRows]);
+  const filtered = useMemo(() => all.filter((r) => {
+    if (filters.search) { const s = filters.search.toLowerCase(); if (!String(r.market).toLowerCase().includes(s)) return false; }
+    return true;
+  }), [all, filters]);
+  const { sorted, sortCol, sortDir, sort } = useSortable(filtered, "ltrStrict");
+  const th = (col, label) => <Th col={col} label={label} sortCol={sortCol} sortDir={sortDir} onSort={sort} />;
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <h2 style={{ color: "#f1f5f9", fontSize: 20, fontWeight: 700 }}>Market Rankings</h2>
+        <button onClick={() => exportCSV(sorted, "market-rankings.csv")} style={exportBtn}>Export CSV</button>
+      </div>
+      <div style={{ color: "#64748b", fontSize: 13, marginBottom: 16 }}>Based on LTR survey responses only — Market is not present in the KPI carrier/driver data, so no Completion%, On-Time%, or Composite score is shown here.</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 20, alignItems: "center" }}>
+        <input placeholder="🔍 Search market…" value={filters.search || ""} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))} style={{ background: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: 6, padding: "6px 12px", fontSize: 13, minWidth: 180 }} />
+        <button onClick={() => setFilters({})} style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 6, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>Clear</button>
+      </div>
+      <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid #1e293b" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead><tr>
+            {th("rank", "#")}{th("market", "Market")}{th("storeCount", "Stores")}{th("ltrTotal", "LTR#")}
+            {th("ltrCount910", "9-10")}{th("ltrCount8", "8")}{th("ltrCount07", "0-7")}{th("ltrStrict", "Strict LTR")}
+            {th("ltrNeutral", "Neutral LTR")}{th("detractorCount", "Detractors")}{th("topDetractor", "Top Issue")}
+          </tr></thead>
+          <tbody>
+            {sorted.map((r, i) => (
+              <tr key={i} style={{ background: i % 2 === 0 ? "#0f172a" : "#111827", borderBottom: "1px solid #1e293b" }}>
+                <td style={td}><span style={{ color: "#64748b" }}>#{r.rank}</span></td>
+                <td style={td}><div style={{ color: "#f1f5f9", fontWeight: 600 }}>{r.market}</div>{r.lowSample && <Badge color="#f59e0b">Low Sample</Badge>}</td>
+                <td style={td}>{r.storeCount}</td>
+                <td style={td}>{r.ltrTotal}</td>
+                <td style={{ ...td, color: "#22c55e" }}>{r.ltrCount910}</td>
+                <td style={{ ...td, color: "#eab308" }}>{r.ltrCount8}</td>
+                <td style={{ ...td, color: "#ef4444" }}>{r.ltrCount07}</td>
+                <td style={td}>{r.ltrStrict !== null ? <span style={{ color: colorForScore(r.ltrStrict) }}>{r.ltrStrict.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
+                <td style={td}>{r.ltrNeutral !== null ? <span style={{ color: colorForScore(r.ltrNeutral) }}>{r.ltrNeutral.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
+                <td style={td}><span style={{ color: r.detractorCount > 0 ? "#f87171" : "#94a3b8" }}>{r.detractorCount}</span></td>
+                <td style={td}><span style={{ color: "#94a3b8", fontSize: 12 }}>{r.topDetractor}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ color: "#475569", fontSize: 12, marginTop: 8 }}>{sorted.length} markets shown</div>
+    </div>
+  );
+};
+
 const DetractorReview = ({ ltrRows, filters, setFilters, options }) => {
   const [detFilter, setDetFilter] = useState("");
   const [ltrFilter, setLtrFilter] = useState("");
@@ -856,6 +988,13 @@ const ExecutiveSummary = ({ spRows, speRows, ltrRows, useNeutral }) => {
   const strictOverall = totalLTR ? ((ltr910 / totalLTR) * 100).toFixed(1) : "N/A";
   const neutDenom = totalLTR - ltr8;
   const neutralOverall = neutDenom > 0 ? ((ltr910 / neutDenom) * 100).toFixed(1) : "N/A";
+  // Fleet-wide survey-to-delivery rates: sum Actual Stops across the SP sheet (total
+  // completed deliveries) as the denominator, rather than averaging per-carrier
+  // percentages, since that would overweight low-volume carriers.
+  const totalActualStops = spRows.reduce((s, r) => s + (r.actualStops || 0), 0);
+  const surveyOverall = totalActualStops > 0 ? ((totalLTR / totalActualStops) * 100).toFixed(1) : "N/A";
+  const positiveOverall = totalActualStops > 0 ? ((ltr910 / totalActualStops) * 100).toFixed(1) : "N/A";
+  const negativeOverall = totalActualStops > 0 ? ((ltr07 / totalActualStops) * 100).toFixed(1) : "N/A";
   const detMap = {};
   ltrRows.forEach((r) => { if (r.detractor) detMap[r.detractor] = (detMap[r.detractor] || 0) + 1; });
   const detData = Object.entries(detMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8);
@@ -883,6 +1022,20 @@ const ExecutiveSummary = ({ spRows, speRows, ltrRows, useNeutral }) => {
   return (
     <div>
       <h2 style={{ color: "#f1f5f9", fontSize: 20, fontWeight: 700, marginBottom: 20 }}>Executive Summary</h2>
+      <div style={{ background: "#0f172a", borderRadius: 10, padding: 16, border: "1px solid #1e293b", marginBottom: 20 }}>
+        <div style={{ color: "#94a3b8", fontSize: 12, fontWeight: 600, marginBottom: 12, textTransform: "uppercase", letterSpacing: 0.5 }}>Composite Score Weights</div>
+        <div style={{ display: "flex", width: "100%", height: 28, borderRadius: 6, overflow: "hidden", marginBottom: 10 }}>
+          <div style={{ width: "30%", background: "#38bdf8", display: "flex", alignItems: "center", justifyContent: "center", color: "#06283d", fontSize: 12, fontWeight: 700 }}>30%</div>
+          <div style={{ width: "30%", background: "#818cf8", display: "flex", alignItems: "center", justifyContent: "center", color: "#1a1a3d", fontSize: 12, fontWeight: 700 }}>30%</div>
+          <div style={{ width: "40%", background: "#22c55e", display: "flex", alignItems: "center", justifyContent: "center", color: "#06281a", fontSize: 12, fontWeight: 700 }}>40%</div>
+        </div>
+        <div style={{ display: "flex", gap: 20, flexWrap: "wrap", fontSize: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 2, background: "#38bdf8" }} /><span style={{ color: "#cbd5e1" }}>Completion % — 30%</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 2, background: "#818cf8" }} /><span style={{ color: "#cbd5e1" }}>On-Time In Window % — 30%</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 2, background: "#22c55e" }} /><span style={{ color: "#cbd5e1" }}>LTR Score ({useNeutral ? "Neutral" : "Strict"}) — 40%</span></div>
+        </div>
+        <div style={{ color: "#64748b", fontSize: 11, marginTop: 10 }}>On-Time % and Redelivery % are shown in the rankings tables for reference but are not part of the Composite score.</div>
+      </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 24 }}>
         <KPICard label="Total LTR Responses" value={totalLTR} color="#38bdf8" />
         <KPICard label="Strict LTR Score" value={strictOverall + "%"} color="#22c55e" sub="9-10 / Total" />
@@ -892,6 +1045,9 @@ const ExecutiveSummary = ({ spRows, speRows, ltrRows, useNeutral }) => {
         <KPICard label="Detractors (0-7)" value={ltr07} color="#ef4444" />
         <KPICard label="Active Drivers" value={speRows.length} color="#38bdf8" />
         <KPICard label="Active Carriers" value={carrierRows.length} color="#fb923c" />
+        <KPICard label="Survey % of Deliveries" value={surveyOverall + "%"} color="#94a3b8" sub="Surveys / Actual Stops" />
+        <KPICard label="Positive Survey % of Deliveries" value={positiveOverall + "%"} color="#22c55e" sub="9-10 / Actual Stops" />
+        <KPICard label="Negative Survey % of Deliveries" value={negativeOverall + "%"} color="#ef4444" sub="0-7 / Actual Stops" />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
         <div style={{ background: "#0f172a", borderRadius: 10, padding: 16, border: "1px solid #1e293b" }}>
@@ -944,7 +1100,7 @@ const ExecutiveSummary = ({ spRows, speRows, ltrRows, useNeutral }) => {
   );
 };
 
-const TABS = ["Executive Summary", "Driver Rankings", "Carrier Rankings", "Store Rankings", "Detractor Review", "Upload / Refresh"];
+const TABS = ["Executive Summary", "Driver Rankings", "Carrier Rankings", "Store Rankings", "Market Rankings", "Detractor Review", "Upload / Refresh"];
 
 function App() {
   const [data, setData] = useState(null);
@@ -1002,7 +1158,7 @@ function App() {
         {[["#22c55e", "≥95% Excellent"], ["#eab308", "90-94% Good"], ["#ef4444", "<90% Needs Attention"]].map(([c, l]) => (
           <div key={l} style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 2, background: c }} /><span style={{ color: "#64748b", fontSize: 11 }}>{l}</span></div>
         ))}
-        <div style={{ marginLeft: "auto", color: "#475569", fontSize: 11 }}>Composite = Completion(25%) + OT Window(25%) + OT(20%) + LTR(20%) − Redelivery(10%)</div>
+        <div style={{ marginLeft: "auto", color: "#475569", fontSize: 11 }}>Composite = Completion(30%) + OT Window(30%) + LTR(40%) — OT% and Redelivery% are informational only</div>
       </div>
       <div style={{ padding: "24px", maxWidth: 1600, margin: "0 auto" }}>
         {tab === "Upload / Refresh" && <UploadPage onLoad={(d) => { setData(d); setTab("Executive Summary"); }} />}
@@ -1010,6 +1166,7 @@ function App() {
         {tab === "Driver Rankings" && data && <DriverRankings speRows={data.speRows} ltrRows={data.ltrRows} filters={filters} setFilters={setFilters} options={options} useNeutral={useNeutral} />}
         {tab === "Carrier Rankings" && data && <CarrierRankings spRows={data.spRows} ltrRows={data.ltrRows} filters={filters} setFilters={setFilters} options={options} useNeutral={useNeutral} />}
         {tab === "Store Rankings" && data && <StoreRankings ltrRows={data.ltrRows} filters={filters} setFilters={setFilters} options={options} />}
+        {tab === "Market Rankings" && data && <MarketRankings ltrRows={data.ltrRows} filters={filters} setFilters={setFilters} />}
         {tab === "Detractor Review" && data && <DetractorReview ltrRows={data.ltrRows} filters={filters} setFilters={setFilters} options={options} />}
         {!data && tab !== "Upload / Refresh" && (
           <div style={{ textAlign: "center", paddingTop: 80, color: "#475569" }}>
