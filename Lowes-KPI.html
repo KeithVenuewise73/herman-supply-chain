@@ -735,13 +735,17 @@ const DriverRankings = ({ speRows, ltrRows, filters, setFilters, options, useNeu
         <h2 style={{ color: "#f1f5f9", fontSize: 20, fontWeight: 700 }}>Driver / SPE Rankings</h2>
         <button onClick={() => exportCSV(sorted, "driver-rankings.csv")} style={exportBtn}>Export CSV</button>
       </div>
+      <div style={{ color: "#64748b", fontSize: 12, marginBottom: 16, lineHeight: 1.6 }}>
+        <strong style={{ color: "#94a3b8" }}>Survey% / Pos Survey% / Neg Survey%</strong> = number of survey responses (total / 9-10 scores / 0-7 scores) ÷ Actual Stops (completed deliveries) for that driver — i.e. what share of their completed deliveries generated a survey response at all, and whether it was positive or negative.<br />
+        <strong style={{ color: "#94a3b8" }}>Composite</strong> = Completion% (30%) + On-Time In Window% (30%) + LTR Score (40%, {useNeutral ? "Neutral" : "Strict"}). OT% and Redelivery% are not part of this score; LTR contributes 0 when a driver has no survey responses.
+      </div>
       <FiltersBar filters={filters} setFilters={setFilters} options={options} />
       <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid #1e293b" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead><tr>
             {th("rank", "#")}{th("name", "Driver/SPE")}{th("carrier", "Carrier")}{th("routes", "Routes")}
             {th("plannedStops", "Planned")}{th("actualStops", "Actual")}{th("completion", "Compl%")}
-            {th("onTimeInWindow", "OT Win%")}{th("onTime", "OT%")}{th("redeliveryPct", "Redel%")}
+            {th("onTimeInWindow", "OT Win%")}
             {th("surveyPct", "Survey%")}{th("positivePct", "Pos Survey%")}{th("negativePct", "Neg Survey%")}
             {th("ltrTotal", "LTR#")}{th("ltrCount910", "9-10")}{th("ltrCount8", "8")}{th("ltrCount07", "0-7")}
             {th("ltrStrict", "Strict LTR")}{th("ltrNeutral", "Neutral LTR")}{th("composite", "Composite")}
@@ -757,8 +761,6 @@ const DriverRankings = ({ speRows, ltrRows, filters, setFilters, options, useNeu
                 <td style={td}>{r.actualStops ?? "—"}</td>
                 <td style={{ ...td, color: colorForScore(r.completion) }}>{r.completion !== null ? r.completion.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: colorForScore(r.onTimeInWindow) }}>{r.onTimeInWindow !== null ? r.onTimeInWindow.toFixed(1) + "%" : "—"}</td>
-                <td style={{ ...td, color: colorForScore(r.onTime) }}>{r.onTime !== null ? r.onTime.toFixed(1) + "%" : "—"}</td>
-                <td style={{ ...td, color: (r.redeliveryPct || 0) > 10 ? "#ef4444" : "#94a3b8" }}>{r.redeliveryPct !== null ? r.redeliveryPct.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: "#94a3b8" }}>{r.surveyPct !== null ? r.surveyPct.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: "#22c55e" }}>{r.positivePct !== null ? r.positivePct.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: "#ef4444" }}>{r.negativePct !== null ? r.negativePct.toFixed(1) + "%" : "—"}</td>
@@ -811,7 +813,7 @@ const CarrierRankings = ({ spRows, ltrRows, filters, setFilters, options, useNeu
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead><tr>
             {th("rank", "#")}{th("carrier", "Carrier")}{th("routes", "Routes")}{th("plannedStops", "Planned")}
-            {th("actualStops", "Actual")}{th("completion", "Compl%")}{th("onTimeInWindow", "OT Win%")}{th("onTime", "OT%")}
+            {th("actualStops", "Actual")}{th("completion", "Compl%")}{th("onTimeInWindow", "OT Win%")}
             {th("surveyPct", "Survey%")}{th("positivePct", "Pos Survey%")}{th("negativePct", "Neg Survey%")}
             {th("ltrTotal", "LTR#")}{th("ltrCount910", "9-10")}{th("ltrCount8", "8")}
             {th("ltrCount07", "0-7")}{th("ltrStrict", "Strict LTR")}{th("ltrNeutral", "Neutral LTR")}{th("composite", "Composite")}
@@ -826,7 +828,6 @@ const CarrierRankings = ({ spRows, ltrRows, filters, setFilters, options, useNeu
                 <td style={td}>{r.actualStops ?? "—"}</td>
                 <td style={{ ...td, color: colorForScore(r.completion) }}>{r.completion !== null ? r.completion.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: colorForScore(r.onTimeInWindow) }}>{r.onTimeInWindow !== null ? r.onTimeInWindow.toFixed(1) + "%" : "—"}</td>
-                <td style={{ ...td, color: colorForScore(r.onTime) }}>{r.onTime !== null ? r.onTime.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: "#94a3b8" }}>{r.surveyPct !== null ? r.surveyPct.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: "#22c55e" }}>{r.positivePct !== null ? r.positivePct.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: "#ef4444" }}>{r.negativePct !== null ? r.negativePct.toFixed(1) + "%" : "—"}</td>
@@ -977,17 +978,19 @@ const MarketRankings = ({ ltrRows, filters, setFilters }) => {
 
 const DetractorReview = ({ ltrRows, filters, setFilters, options }) => {
   const [detFilter, setDetFilter] = useState("");
-  const [ltrFilter, setLtrFilter] = useState("");
+  const [ltrFilters, setLtrFilters] = useState([]); // array of selected scores (numbers), empty = all
+  const toggleLtrScore = (n) => setLtrFilters((prev) => prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]);
   const filtered = useMemo(() => ltrRows.filter((r) => {
-    // Normalized comparison: the LTR file and KPI file sometimes spell the same carrier
-    // slightly differently (e.g. "A&M Trucking LLC" vs "A & M Trucking LLC"), so an exact
-    // string match against the dropdown selection can silently return zero rows.
+    // Normalized comparison guards against trivial formatting differences (case,
+    // punctuation, LLC/Inc/Corp suffixes) between how a carrier name is entered across
+    // sheets — without merging genuinely different companies (e.g. "A&M Trucking LLC"
+    // and "A & M Trucking LLC" are confirmed distinct and must NOT be treated as equal).
     if (filters.carrier && normalizeCarrier(r.carrier) !== normalizeCarrier(filters.carrier)) return false;
     if (filters.search) { const s = filters.search.toLowerCase(); if (!r.store.name.toLowerCase().includes(s) && !r.contractorCarrier.toLowerCase().includes(s)) return false; }
     if (detFilter && r.detractor !== detFilter) return false;
-    if (ltrFilter && String(r.ltr) !== ltrFilter) return false;
+    if (ltrFilters.length > 0 && !ltrFilters.includes(r.ltr)) return false;
     return true;
-  }), [ltrRows, filters, detFilter, ltrFilter]);
+  }), [ltrRows, filters, detFilter, ltrFilters]);
   const detCategories = useMemo(() => [...new Set(ltrRows.map((r) => r.detractor).filter(Boolean))], [ltrRows]);
   const { sorted, sortCol, sortDir, sort } = useSortable(filtered, "deliveryDate");
   const th = (col, label) => <Th col={col} label={label} sortCol={sortCol} sortDir={sortDir} onSort={sort} />;
@@ -997,7 +1000,7 @@ const DetractorReview = ({ ltrRows, filters, setFilters, options }) => {
         <h2 style={{ color: "#f1f5f9", fontSize: 20, fontWeight: 700 }}>LTR Detail / Detractor Review</h2>
         <button onClick={() => exportCSV(sorted.map((r) => ({ date: r.deliveryDate, store: r.store.name, carrier: r.carrier, driver: r.contractorCarrier, ltr: r.ltr, detractor: r.detractor, improvement: r.improvementComment, followUp: r.followUpComment })), "detractor-review.csv")} style={exportBtn}>Export CSV</button>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 20 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
         <input placeholder="🔍 Search store / driver…" value={filters.search || ""} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))} style={{ background: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: 6, padding: "6px 12px", fontSize: 13, minWidth: 200 }} />
         <select value={filters.carrier || ""} onChange={(e) => setFilters((f) => ({ ...f, carrier: e.target.value }))} style={{ background: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}>
           <option value="">All Carriers</option>{(options.carrier || []).map((o) => <option key={o}>{o}</option>)}
@@ -1005,10 +1008,18 @@ const DetractorReview = ({ ltrRows, filters, setFilters, options }) => {
         <select value={detFilter} onChange={(e) => setDetFilter(e.target.value)} style={{ background: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}>
           <option value="">All Categories</option>{detCategories.map((d) => <option key={d}>{d}</option>)}
         </select>
-        <select value={ltrFilter} onChange={(e) => setLtrFilter(e.target.value)} style={{ background: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}>
-          <option value="">All LTR Scores</option>{[10,9,8,7,6,5,4,3,2,1,0].map((n) => <option key={n}>{n}</option>)}
-        </select>
-        <button onClick={() => { setFilters({}); setDetFilter(""); setLtrFilter(""); }} style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 6, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>Clear</button>
+        <button onClick={() => { setFilters({}); setDetFilter(""); setLtrFilters([]); }} style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 6, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>Clear</button>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20, alignItems: "center" }}>
+        <span style={{ color: "#64748b", fontSize: 12 }}>LTR Scores:</span>
+        {[10,9,8,7,6,5,4,3,2,1,0].map((n) => {
+          const active = ltrFilters.includes(n);
+          const color = n >= 9 ? "#22c55e" : n === 8 ? "#eab308" : "#ef4444";
+          return (
+            <button key={n} onClick={() => toggleLtrScore(n)} style={{ background: active ? color + "33" : "#1e293b", color: active ? color : "#64748b", border: `1px solid ${active ? color : "#334155"}`, borderRadius: 6, padding: "4px 10px", fontSize: 13, fontWeight: active ? 700 : 400, cursor: "pointer" }}>{n}</button>
+          );
+        })}
+        {ltrFilters.length > 0 && <button onClick={() => setLtrFilters([])} style={{ background: "none", border: "none", color: "#38bdf8", fontSize: 12, cursor: "pointer", textDecoration: "underline" }}>clear scores</button>}
       </div>
       <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid #1e293b" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
