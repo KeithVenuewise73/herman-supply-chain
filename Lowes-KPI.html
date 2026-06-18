@@ -231,20 +231,32 @@ const parseSPESheet = (sheet) => {
   });
 };
 
-const parseFiles = (kpiFile, ltrFile) => {
-  const wb1 = XLSX.read(kpiFile, { type: "array", cellDates: true });
+// Converts an Invoice Order Number cell value to a full plain-integer string. Excel
+// stores some of these as numbers; sheet_to_json's default text formatting (raw:false)
+// renders large numbers in scientific notation (e.g. "3.00901E+17"), which makes
+// genuinely different invoice numbers collide once truncated. Reading the same cell
+// with raw:true preserves the full digit string instead. Note: invoice numbers this
+// large (18 digits) exceed JS's safe-integer range, so the last 1-2 digits may not be
+// perfectly exact vs. the original Excel value — but this is vastly more precise than
+// the scientific-notation string, and is only ever used as a secondary signal alongside
+// every other field, never as a sole duplicate key.
+const fullInvoiceNumber = (v) => {
+  if (v === "" || v === null || v === undefined) return "";
+  if (typeof v === "number") return Math.round(v).toString();
+  return String(v).replace(/^#/, "").trim();
+};
+
+// Parses a single LTR/Detractor workbook buffer into row objects, including the
+// Market corruption-recovery logic. Returns rows plus a count of markets recovered
+// within this one file (market recovery only looks within a single file's own data,
+// since a store's market shouldn't need cross-file lookup).
+const parseLTRWorkbook = (ltrFile) => {
   const wb2 = XLSX.read(ltrFile, { type: "array", cellDates: true });
-
-  const spSheet = wb1.Sheets["SP Weekly Summary"];
-  // Only ever read the canonical "SPE Weekly Summary" sheet — "SPE Weekly Summary (2)"
-  // is a stray empty duplicate and must be ignored even if present.
-  const speSheet = wb1.Sheets["SPE Weekly Summary"];
-
-  const spRows = parseSPSheet(spSheet);
-  const speRows = parseSPESheet(speSheet);
-
   const ltrSheet = wb2.Sheets["LTR Data"] || wb2.Sheets[wb2.SheetNames[0]];
   const ltrRaw = ltrSheet ? XLSX.utils.sheet_to_json(ltrSheet, { defval: "", raw: false }) : [];
+  // Second pass, raw:true, used only to recover full-precision Invoice Order Numbers
+  // (see fullInvoiceNumber above) — every other field still comes from ltrRaw.
+  const ltrRawNumeric = ltrSheet ? XLSX.utils.sheet_to_json(ltrSheet, { defval: "", raw: true }) : [];
 
   // Some source rows have a corrupted Market value: Excel has misread what should be a
   // plain numeric market code (e.g. "1251") as a date, producing strings like "6/4/03 0:00".
@@ -260,8 +272,9 @@ const parseFiles = (kpiFile, ltrFile) => {
   });
 
   let marketsRecovered = 0;
-  const ltrRows = ltrRaw.map((r) => {
+  const ltrRows = ltrRaw.map((r, idx) => {
     const get = makeGetter(r);
+    const getNumeric = makeGetter(ltrRawNumeric[idx] || {});
     const ltrVal = toNum(get("likelihoodtorecommend", "ltr", "likelihood"));
     const store = parseStoreName(get("store"));
     const storeRaw = String(get("store") || "").trim();
@@ -273,6 +286,7 @@ const parseFiles = (kpiFile, ltrFile) => {
     return {
       store, ltr: ltrVal,
       market,
+      invoiceNumber: fullInvoiceNumber(getNumeric("invoiceordernumber", "invoicenumber", "invoice")),
       // LTR file: "Contractor Carrier" = driver/SPE name, "Carrier" = contractor/carrier name.
       contractorCarrier: String(get("contractorcarrier") || "").trim(),
       carrier: String(get("carrier") || "").trim(),
@@ -285,6 +299,55 @@ const parseFiles = (kpiFile, ltrFile) => {
     };
   }).filter((r) => r.ltr !== null);
 
+  return { ltrRows, marketsRecovered };
+};
+
+// A stable key identifying a single real survey response, used to silently drop exact
+// duplicate rows when multiple LTR files are uploaded together (e.g. the same file
+// selected twice by accident). Includes Invoice Order Number AND every other field —
+// verified against real data that invoice number alone is not always safe to rely on
+// (some rows share a missing/placeholder invoice value despite being genuinely
+// different responses), and that other fields alone are not safe either (two
+// legitimately different deliveries can share every visible field except a comment,
+// or even share an empty comment). Requiring all of them together avoids both kinds
+// of false match while still catching true duplicates (the same response logged twice).
+const ltrRowDedupeKey = (r) =>
+  [r.invoiceNumber, r.store.number, r.store.name, r.responseDate, r.deliveryDate, r.saleDate, r.contractorCarrier,
+   r.carrier, r.ltr, r.market, r.detractor, r.improvementComment, r.followUpComment].join("||");
+
+const parseFiles = (kpiFile, ltrFiles) => {
+  const wb1 = XLSX.read(kpiFile, { type: "array", cellDates: true });
+
+  const spSheet = wb1.Sheets["SP Weekly Summary"];
+  // Only ever read the canonical "SPE Weekly Summary" sheet — "SPE Weekly Summary (2)"
+  // is a stray empty duplicate and must be ignored even if present.
+  const speSheet = wb1.Sheets["SPE Weekly Summary"];
+
+  const spRows = parseSPSheet(spSheet);
+  const speRows = parseSPESheet(speSheet);
+
+  // ltrFiles is an array (1 to 4 files) — each parsed independently, then concatenated.
+  // Exact-duplicate rows across files (e.g. the same file accidentally selected twice)
+  // are silently dropped, keeping only the first occurrence.
+  const perFileStats = [];
+  const seen = new Set();
+  let marketsRecovered = 0;
+  let duplicatesSkipped = 0;
+  const ltrRows = [];
+  ltrFiles.forEach((file, idx) => {
+    const { ltrRows: fileRows, marketsRecovered: fileMarketsRecovered } = parseLTRWorkbook(file);
+    marketsRecovered += fileMarketsRecovered;
+    let keptFromThisFile = 0;
+    fileRows.forEach((r) => {
+      const key = ltrRowDedupeKey(r);
+      if (seen.has(key)) { duplicatesSkipped++; return; }
+      seen.add(key);
+      ltrRows.push(r);
+      keptFromThisFile++;
+    });
+    perFileStats.push({ fileName: file.name || `File ${idx + 1}`, rowsParsed: fileRows.length, rowsKept: keptFromThisFile });
+  });
+
   return {
     spRows, speRows, ltrRows,
     debug: {
@@ -295,6 +358,8 @@ const parseFiles = (kpiFile, ltrFile) => {
       uniqueCarriersSPE: [...new Set(speRows.map((r) => r.carrier).filter(Boolean))],
       uniqueDriversSPE: [...new Set(speRows.map((r) => r.speName).filter(Boolean))],
       marketsRecovered,
+      duplicatesSkipped,
+      perFileStats,
     },
   };
 };
@@ -364,9 +429,12 @@ const loadFromSupabase = async () => {
 };
 
 // ─── Shared Styles ────────────────────────────────────────────────────────
-const td = { padding: "9px 12px", color: "#cbd5e1", verticalAlign: "middle" };
+const td = { padding: "8px 8px", color: "#cbd5e1", verticalAlign: "middle" };
+// Caps long carrier/driver names so they don't stretch the whole table wide; full name
+// is still available on hover via the title attribute.
+const truncated = { maxWidth: 170, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const thStyle = {
-  padding: "10px 12px", textAlign: "left", background: "#0f172a", color: "#94a3b8",
+  padding: "9px 8px", textAlign: "left", background: "#0f172a", color: "#94a3b8",
   fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5,
   position: "sticky", top: 0, zIndex: 2, borderBottom: "1px solid #1e293b",
 };
@@ -593,7 +661,7 @@ const buildMarketRows = (ltrRows) => {
 // ─── Upload Page ──────────────────────────────────────────────────────────
 const UploadPage = ({ onLoad }) => {
   const [kpiFile, setKpiFile] = useState(null);
-  const [ltrFile, setLtrFile] = useState(null);
+  const [ltrFiles, setLtrFiles] = useState([]); // array, 1-4 files
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState("");
@@ -602,17 +670,28 @@ const UploadPage = ({ onLoad }) => {
 
   const readFile = (file) => new Promise((res, rej) => {
     const r = new FileReader();
-    r.onload = (e) => res(new Uint8Array(e.target.result));
+    r.onload = (e) => { const buf = new Uint8Array(e.target.result); buf.name = file.name; res(buf); };
     r.onerror = rej;
     r.readAsArrayBuffer(file);
   });
 
+  const addLtrFiles = (newFiles) => {
+    const files = Array.from(newFiles || []);
+    if (!files.length) return;
+    setLtrFiles((prev) => {
+      const combined = [...prev, ...files];
+      // Keep at most 4 — if more are added, keep the most recently added ones.
+      return combined.slice(-4);
+    });
+  };
+  const removeLtrFile = (idx) => setLtrFiles((prev) => prev.filter((_, i) => i !== idx));
+
   const handleLoad = async () => {
-    if (!kpiFile || !ltrFile) { setError("Please upload both files."); return; }
+    if (!kpiFile || ltrFiles.length === 0) { setError("Please upload the KPI file and at least one LTR file."); return; }
     setLoading(true); setError(""); setProgress("Parsing Excel files...");
     try {
-      const [kpi, ltr] = await Promise.all([readFile(kpiFile), readFile(ltrFile)]);
-      const data = parseFiles(kpi, ltr);
+      const [kpi, ...ltrs] = await Promise.all([readFile(kpiFile), ...ltrFiles.map(readFile)]);
+      const data = parseFiles(kpi, ltrs);
 
       // Build the driver-name index the same way buildDriverRows does, so the debug
       // counts on this page reflect exactly what Driver Rankings will show.
@@ -631,6 +710,8 @@ const UploadPage = ({ onLoad }) => {
         uniqueDriversSPE: data.debug.uniqueDriversSPE.length,
         matchedDriverLTR, unmatchedDriverLTR,
         marketsRecovered: data.debug.marketsRecovered,
+        duplicatesSkipped: data.debug.duplicatesSkipped,
+        perFileStats: data.debug.perFileStats,
       });
 
       setProgress("Syncing to Supabase...");
@@ -663,6 +744,31 @@ const UploadPage = ({ onLoad }) => {
     );
   };
 
+  const MultiDropZone = ({ label, files, onAdd, onRemove }) => {
+    const ref = useRef();
+    return (
+      <div>
+        <div onClick={() => ref.current.click()} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); onAdd(e.dataTransfer.files); }}
+          style={{ border: "2px dashed #334155", borderRadius: 12, padding: "40px 24px", textAlign: "center", cursor: "pointer", background: files.length ? "rgba(56,189,248,0.05)" : "#0f172a", borderColor: files.length ? "#38bdf8" : "#334155" }}>
+          <input ref={ref} type="file" accept=".xlsx,.xls" multiple style={{ display: "none" }} onChange={(e) => { onAdd(e.target.files); e.target.value = null; }} />
+          <div style={{ fontSize: 32, marginBottom: 8 }}>📊</div>
+          <div style={{ color: files.length ? "#38bdf8" : "#64748b", fontWeight: 600 }}>{files.length ? `${files.length} file${files.length > 1 ? "s" : ""} selected` : label}</div>
+          <div style={{ color: "#475569", fontSize: 12, marginTop: 4 }}>Click or drag & drop — up to 4 files (e.g. one per district group)</div>
+        </div>
+        {files.length > 0 && (
+          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+            {files.map((f, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1e293b", borderRadius: 6, padding: "6px 10px", fontSize: 12 }}>
+                <span style={{ color: "#cbd5e1" }}>{f.name}</span>
+                <span onClick={(e) => { e.stopPropagation(); onRemove(i); }} style={{ color: "#f87171", cursor: "pointer", padding: "0 4px" }}>✕</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div style={{ maxWidth: 700, margin: "40px auto", padding: "0 20px" }}>
       <h2 style={{ color: "#f1f5f9", fontSize: 22, marginBottom: 8 }}>Upload / Refresh Data</h2>
@@ -677,9 +783,9 @@ const UploadPage = ({ onLoad }) => {
         </button>
       </div>
       <div style={{ color: "#475569", textAlign: "center", marginBottom: 20, fontSize: 13 }}>— or upload new Excel files —</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 24, alignItems: "start" }}>
         <DropZone label="Lowe's Carrier KPI (.xlsx)" file={kpiFile} onFile={setKpiFile} />
-        <DropZone label="LTR Detractor Sheet (.xlsx)" file={ltrFile} onFile={setLtrFile} />
+        <MultiDropZone label="LTR Detractor Sheet(s) (.xlsx)" files={ltrFiles} onAdd={addLtrFiles} onRemove={removeLtrFile} />
       </div>
       {progress && <div style={{ background: "#1e293b", borderRadius: 8, padding: "10px 16px", marginBottom: 16, color: "#38bdf8", fontSize: 13 }}>⏳ {progress}</div>}
       {error && <div style={{ color: "#f87171", marginBottom: 16, fontSize: 13 }}>⚠ {error}</div>}
@@ -700,6 +806,7 @@ const UploadPage = ({ onLoad }) => {
               ["Matched driver LTR rows", debugStats.matchedDriverLTR, "#22c55e"],
               ["Unmatched driver LTR rows", debugStats.unmatchedDriverLTR, debugStats.unmatchedDriverLTR > 0 ? "#ef4444" : "#22c55e"],
               ["Markets auto-recovered", debugStats.marketsRecovered, debugStats.marketsRecovered > 0 ? "#f59e0b" : "#22c55e"],
+              ["Duplicate LTR rows skipped", debugStats.duplicatesSkipped, debugStats.duplicatesSkipped > 0 ? "#f59e0b" : "#22c55e"],
             ].map(([label, value, color]) => (
               <div key={label} style={{ background: "#0f172a", border: `1px solid ${color}40`, borderRadius: 8, padding: "10px 14px" }}>
                 <div style={{ color: "#64748b", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{label}</div>
@@ -707,6 +814,19 @@ const UploadPage = ({ onLoad }) => {
               </div>
             ))}
           </div>
+          {debugStats.perFileStats && debugStats.perFileStats.length > 1 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>Per-file LTR breakdown</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {debugStats.perFileStats.map((f, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 6, padding: "8px 12px", fontSize: 12 }}>
+                    <span style={{ color: "#cbd5e1" }}>{f.fileName}</span>
+                    <span style={{ color: "#94a3b8" }}>{f.rowsParsed} parsed{f.rowsKept !== f.rowsParsed ? `, ${f.rowsKept} kept (${f.rowsParsed - f.rowsKept} duplicate)` : ""}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {debugStats.speRows === 0 && (
             <div style={{ marginTop: 10, color: "#f59e0b", fontSize: 12 }}>⚠ SPE rows loaded is 0 — check that the "SPE Weekly Summary" sheet exists and has headers on row 2.</div>
           )}
@@ -715,6 +835,9 @@ const UploadPage = ({ onLoad }) => {
           )}
           {debugStats.marketsRecovered > 0 && (
             <div style={{ marginTop: 6, color: "#64748b", fontSize: 12 }}>{debugStats.marketsRecovered} row(s) had a corrupted Market value (Excel misread it as a date) and were auto-recovered by matching the store to its market elsewhere in the file.</div>
+          )}
+          {debugStats.duplicatesSkipped > 0 && (
+            <div style={{ marginTop: 6, color: "#64748b", fontSize: 12 }}>{debugStats.duplicatesSkipped} row(s) appeared in more than one uploaded LTR file (same store, response date, delivery date, driver, carrier, and score) and were counted only once.</div>
           )}
         </div>
       )}
@@ -748,7 +871,7 @@ const DriverRankings = ({ speRows, ltrRows, filters, setFilters, options, useNeu
       </div>
       <FiltersBar filters={filters} setFilters={setFilters} options={options} />
       <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid #1e293b" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead><tr>
             {th("rank", "#")}{th("name", "Driver/SPE")}{th("carrier", "Carrier")}{th("routes", "Routes")}
             {th("plannedStops", "Planned")}{th("actualStops", "Actual")}{th("completion", "Compl%")}
@@ -761,8 +884,8 @@ const DriverRankings = ({ speRows, ltrRows, filters, setFilters, options, useNeu
             {sorted.map((r, i) => (
               <tr key={i} style={{ background: i % 2 === 0 ? "#0f172a" : "#111827", borderBottom: "1px solid #1e293b" }}>
                 <td style={td}><span style={{ color: "#64748b" }}>#{r.rank}</span></td>
-                <td style={td}><div style={{ color: "#f1f5f9", fontWeight: 600 }}>{r.name || "—"}</div>{r.lowSample && <Badge color="#f59e0b">Low Sample</Badge>}</td>
-                <td style={td}><span style={{ color: "#94a3b8" }}>{r.carrier || "—"}</span></td>
+                <td style={td}><div style={{ color: "#f1f5f9", fontWeight: 600, ...truncated }} title={r.name}>{r.name || "—"}</div>{r.lowSample && <Badge color="#f59e0b">Low Sample</Badge>}</td>
+                <td style={td}><span style={{ color: "#94a3b8", ...truncated, display: "inline-block" }} title={r.carrier}>{r.carrier || "—"}</span></td>
                 <td style={td}>{r.routes ?? "—"}</td>
                 <td style={td}>{r.plannedStops ?? "—"}</td>
                 <td style={td}>{r.actualStops ?? "—"}</td>
@@ -818,7 +941,7 @@ const CarrierRankings = ({ spRows, ltrRows, filters, setFilters, options, useNeu
         <button onClick={() => setFilters((f) => ({ search: "", carrier: "", region: "" }))} style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 6, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>Clear</button>
       </div>
       <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid #1e293b" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead><tr>
             {th("rank", "#")}{th("carrier", "Carrier")}{th("routes", "Routes")}{th("plannedStops", "Planned")}
             {th("actualStops", "Actual")}{th("completion", "Compl%")}{th("onTimeInWindow", "OT Win%")}
@@ -830,7 +953,7 @@ const CarrierRankings = ({ spRows, ltrRows, filters, setFilters, options, useNeu
             {sorted.map((r, i) => (
               <tr key={i} style={{ background: i % 2 === 0 ? "#0f172a" : "#111827", borderBottom: "1px solid #1e293b" }}>
                 <td style={td}><span style={{ color: "#64748b" }}>#{r.rank}</span></td>
-                <td style={td}><div style={{ color: "#f1f5f9", fontWeight: 600 }}>{r.carrier || "—"}</div>{r.lowSample && <Badge color="#f59e0b">Low Sample</Badge>}</td>
+                <td style={td}><div style={{ color: "#f1f5f9", fontWeight: 600, ...truncated }} title={r.carrier}>{r.carrier || "—"}</div>{r.lowSample && <Badge color="#f59e0b">Low Sample</Badge>}</td>
                 <td style={td}>{r.routes ?? "—"}</td>
                 <td style={td}>{r.plannedStops ?? "—"}</td>
                 <td style={td}>{r.actualStops ?? "—"}</td>
@@ -890,7 +1013,7 @@ const StoreRankings = ({ ltrRows, filters, setFilters, options }) => {
         </div>
       )}
       <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid #1e293b" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead><tr>
             {th("fleetRank", "Fleet Rank")}{th("marketRank", "Market Rank")}{th("market", "Market")}{th("storeNum", "Store #")}{th("storeName", "Store Name")}{th("ltrTotal", "LTR#")}
             {th("ltrCount910", "9-10")}{th("ltrCount8", "8")}{th("ltrCount07", "0-7")}{th("ltrStrict", "Strict LTR")}
@@ -904,7 +1027,7 @@ const StoreRankings = ({ ltrRows, filters, setFilters, options }) => {
                 <td style={td}><span style={{ color: "#38bdf8", fontWeight: 600 }}>#{r.marketRank}</span><span style={{ color: "#475569", fontSize: 11 }}> /{r.marketStoreCount}</span></td>
                 <td style={td}><span style={{ color: "#94a3b8" }}>{r.market}</span></td>
                 <td style={td}><span style={{ color: "#38bdf8", fontWeight: 700 }}>{r.storeNum || "—"}</span></td>
-                <td style={td}><div style={{ color: "#f1f5f9" }}>{r.storeName}</div>{r.lowSample && <Badge color="#f59e0b">Low Sample</Badge>}</td>
+                <td style={td}><div style={{ color: "#f1f5f9", ...truncated }} title={r.storeName}>{r.storeName}</div>{r.lowSample && <Badge color="#f59e0b">Low Sample</Badge>}</td>
                 <td style={td}>{r.ltrTotal}</td>
                 <td style={{ ...td, color: "#22c55e" }}>{r.ltrCount910}</td>
                 <td style={{ ...td, color: "#eab308" }}>{r.ltrCount8}</td>
@@ -956,7 +1079,7 @@ const MarketRankings = ({ ltrRows, filters, setFilters }) => {
         <button onClick={() => setFilters({})} style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 6, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>Clear</button>
       </div>
       <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid #1e293b" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead><tr>
             {th("rank", "#")}{th("market", "Market")}{th("storeCount", "Stores")}{th("ltrTotal", "LTR#")}
             {th("ltrCount910", "9-10")}{th("ltrCount8", "8")}{th("ltrCount07", "0-7")}{th("ltrStrict", "Strict LTR")}
@@ -1038,7 +1161,7 @@ const DetractorReview = ({ ltrRows, filters, setFilters, options }) => {
         {ltrFilters.length > 0 && <button onClick={() => setLtrFilters([])} style={{ background: "none", border: "none", color: "#38bdf8", fontSize: 12, cursor: "pointer", textDecoration: "underline" }}>clear scores</button>}
       </div>
       <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid #1e293b" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead><tr>
             {th("deliveryDate", "Date")}{th("store", "Store")}{th("carrier", "Carrier")}{th("contractorCarrier", "Driver/SPE")}
             {th("ltr", "LTR")}{th("detractor", "Category")}<th style={thStyle}>Improvement Comment</th><th style={thStyle}>Follow-up Comment</th>
@@ -1047,13 +1170,13 @@ const DetractorReview = ({ ltrRows, filters, setFilters, options }) => {
             {sorted.map((r, i) => (
               <tr key={i} style={{ background: i % 2 === 0 ? "#0f172a" : "#111827", borderBottom: "1px solid #1e293b" }}>
                 <td style={td}><span style={{ color: "#64748b", whiteSpace: "nowrap" }}>{r.deliveryDate || "—"}</span></td>
-                <td style={td}><span style={{ color: "#38bdf8", fontWeight: 600 }}>{r.store.number}</span><span style={{ color: "#94a3b8", marginLeft: 4, fontSize: 12 }}>{r.store.name}</span></td>
-                <td style={td}>{r.carrier || "—"}</td>
-                <td style={td}>{r.contractorCarrier || "—"}</td>
+                <td style={td}><span style={{ color: "#38bdf8", fontWeight: 600 }}>{r.store.number}</span><span style={{ color: "#94a3b8", marginLeft: 4, fontSize: 12 }} title={r.store.name}>{r.store.name}</span></td>
+                <td style={{ ...td, ...truncated, display: "table-cell" }} title={r.carrier}>{r.carrier || "—"}</td>
+                <td style={{ ...td, ...truncated, display: "table-cell" }} title={r.contractorCarrier}>{r.contractorCarrier || "—"}</td>
                 <td style={td}><span style={{ fontWeight: 700, fontSize: 15, color: r.ltr >= 9 ? "#22c55e" : r.ltr === 8 ? "#eab308" : "#ef4444" }}>{r.ltr}</span></td>
                 <td style={td}>{r.detractor ? <Badge color="#f87171">{r.detractor}</Badge> : <span style={{ color: "#475569" }}>—</span>}</td>
-                <td style={{ ...td, maxWidth: 250 }}><span style={{ color: "#94a3b8", fontSize: 12 }}>{r.improvementComment || "—"}</span></td>
-                <td style={{ ...td, maxWidth: 250 }}><span style={{ color: "#94a3b8", fontSize: 12 }}>{r.followUpComment || "—"}</span></td>
+                <td style={{ ...td, ...truncated, maxWidth: 200, display: "table-cell" }} title={r.improvementComment}><span style={{ color: "#94a3b8", fontSize: 12 }}>{r.improvementComment || "—"}</span></td>
+                <td style={{ ...td, ...truncated, maxWidth: 200, display: "table-cell" }} title={r.followUpComment}><span style={{ color: "#94a3b8", fontSize: 12 }}>{r.followUpComment || "—"}</span></td>
               </tr>
             ))}
           </tbody>
