@@ -101,14 +101,18 @@ const bgForScore = (score) => {
 };
 const calcLTR = (responses) => {
   const total = responses.length;
-  if (!total) return { strict: null, neutral: null, count910: 0, count8: 0, count07: 0, total: 0 };
+  if (!total) return { strict: null, neutral: null, positive: null, count910: 0, count8: 0, count07: 0, total: 0 };
   const count910 = responses.filter((r) => r >= 9).length;
   const count8 = responses.filter((r) => r === 8).length;
   const count07 = responses.filter((r) => r <= 7).length;
   const strict = (count910 / total) * 100;
   const denomNeutral = total - count8;
   const neutral = denomNeutral === 0 ? null : (count910 / denomNeutral) * 100;
-  return { strict, neutral, count910, count8, count07, total };
+  // Positive LTR: treats an 8 the same way a 9 or 10 is treated — counted as a promoter
+  // in both numerator and denominator, rather than excluded (Neutral) or only counted
+  // in the denominator (Strict). (count910 + count8) / total.
+  const positive = ((count910 + count8) / total) * 100;
+  return { strict, neutral, positive, count910, count8, count07, total };
 };
 // Survey-to-delivery metrics: what % of completed deliveries (Actual Stops) generated
 // a survey response at all, and what % generated a positive (9-10) vs negative (0-7) one.
@@ -478,7 +482,7 @@ const buildDriverRows = (speRows, ltrRows, useNeutral) => {
       routes: r.routes, plannedStops: r.plannedStops, actualStops: r.actualStops, completion: avg("completion"),
       onTimeInWindow: avg("onTimeInWindow"), onTime: avg("onTime"), redeliveryPct: avg("redeliveryPct"),
       ltrTotal: ltr.total, ltrCount910: ltr.count910, ltrCount8: ltr.count8, ltrCount07: ltr.count07,
-      ltrStrict: ltr.strict, ltrNeutral: ltr.neutral, lowSample: ltr.total > 0 && ltr.total < 5,
+      ltrStrict: ltr.strict, ltrNeutral: ltr.neutral, ltrPositive: ltr.positive, lowSample: ltr.total > 0 && ltr.total < 5,
       surveyPct: surveyRates.surveyPct, positivePct: surveyRates.positivePct, negativePct: surveyRates.negativePct,
     };
     // Composite still calculates from KPI metrics even with zero LTR responses:
@@ -513,7 +517,7 @@ const buildCarrierRows = (spRows, ltrRows, useNeutral) => {
       routes: r.routes, plannedStops: r.plannedStops, actualStops: r.actualStops, completion: avg("completion"),
       onTimeInWindow: avg("onTimeInWindow"), onTime: avg("onTime"), redeliveryPct: avg("redeliveryPct"),
       ltrTotal: ltr.total, ltrCount910: ltr.count910, ltrCount8: ltr.count8, ltrCount07: ltr.count07,
-      ltrStrict: ltr.strict, ltrNeutral: ltr.neutral, lowSample: ltr.total > 0 && ltr.total < 5,
+      ltrStrict: ltr.strict, ltrNeutral: ltr.neutral, ltrPositive: ltr.positive, lowSample: ltr.total > 0 && ltr.total < 5,
       surveyPct: surveyRates.surveyPct, positivePct: surveyRates.positivePct, negativePct: surveyRates.negativePct,
     };
     row.composite = compositeScore(row, useNeutral);
@@ -536,7 +540,7 @@ const buildStoreRows = (ltrRows) => {
     const topDet = Object.entries(detCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
     return {
       storeNum: r.store.number, storeName: r.store.name, market: r.market, ltrTotal: ltr.total, ltrCount910: ltr.count910,
-      ltrCount8: ltr.count8, ltrCount07: ltr.count07, ltrStrict: ltr.strict, ltrNeutral: ltr.neutral,
+      ltrCount8: ltr.count8, ltrCount07: ltr.count07, ltrStrict: ltr.strict, ltrNeutral: ltr.neutral, ltrPositive: ltr.positive,
       detractorCount: r.detractors.length, topDetractor: topDet, lowSample: ltr.total < 5, comments: r.comments,
     };
   });
@@ -578,7 +582,7 @@ const buildMarketRows = (ltrRows) => {
     const topDet = Object.entries(detCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
     return {
       market: r.market, storeCount: r.storeSet.size, ltrTotal: ltr.total, ltrCount910: ltr.count910,
-      ltrCount8: ltr.count8, ltrCount07: ltr.count07, ltrStrict: ltr.strict, ltrNeutral: ltr.neutral,
+      ltrCount8: ltr.count8, ltrCount07: ltr.count07, ltrStrict: ltr.strict, ltrNeutral: ltr.neutral, ltrPositive: ltr.positive,
       detractorCount: r.detractors.length, topDetractor: topDet, lowSample: ltr.total > 0 && ltr.total < 5,
     };
   }).sort((a, b) => (b.ltrStrict ?? -1) - (a.ltrStrict ?? -1)).map((r, i) => ({ ...r, rank: i + 1 }));
@@ -737,6 +741,7 @@ const DriverRankings = ({ speRows, ltrRows, filters, setFilters, options, useNeu
       </div>
       <div style={{ color: "#64748b", fontSize: 12, marginBottom: 16, lineHeight: 1.6 }}>
         <strong style={{ color: "#94a3b8" }}>Survey% / Pos Survey% / Neg Survey%</strong> = number of survey responses (total / 9-10 scores / 0-7 scores) ÷ Actual Stops (completed deliveries) for that driver — i.e. what share of their completed deliveries generated a survey response at all, and whether it was positive or negative.<br />
+        <strong style={{ color: "#94a3b8" }}>Strict LTR</strong> = (9-10s) ÷ (all responses) — 8s count against the score. <strong style={{ color: "#94a3b8" }}>Neutral LTR</strong> = (9-10s) ÷ (all responses excluding 8s) — 8s are removed entirely. <strong style={{ color: "#94a3b8" }}>Positive LTR</strong> = (9-10s + 8s) ÷ (all responses) — 8s are treated as promoters, same as a 9 or 10.<br />
         <strong style={{ color: "#94a3b8" }}>Composite</strong> = Completion% (30%) + On-Time In Window% (30%) + LTR Score (40%, {useNeutral ? "Neutral" : "Strict"}). OT% and Redelivery% are not part of this score; LTR contributes 0 when a driver has no survey responses.
       </div>
       <FiltersBar filters={filters} setFilters={setFilters} options={options} />
@@ -748,7 +753,7 @@ const DriverRankings = ({ speRows, ltrRows, filters, setFilters, options, useNeu
             {th("onTimeInWindow", "OT Win%")}
             {th("surveyPct", "Survey%")}{th("positivePct", "Pos Survey%")}{th("negativePct", "Neg Survey%")}
             {th("ltrTotal", "LTR#")}{th("ltrCount910", "9-10")}{th("ltrCount8", "8")}{th("ltrCount07", "0-7")}
-            {th("ltrStrict", "Strict LTR")}{th("ltrNeutral", "Neutral LTR")}{th("composite", "Composite")}
+            {th("ltrStrict", "Strict LTR")}{th("ltrNeutral", "Neutral LTR")}{th("ltrPositive", "Positive LTR")}{th("composite", "Composite")}
           </tr></thead>
           <tbody>
             {sorted.map((r, i) => (
@@ -770,6 +775,7 @@ const DriverRankings = ({ speRows, ltrRows, filters, setFilters, options, useNeu
                 <td style={{ ...td, color: "#ef4444" }}>{r.ltrCount07}</td>
                 <td style={td}>{r.ltrStrict !== null ? <span style={{ color: colorForScore(r.ltrStrict) }}>{r.ltrStrict.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
                 <td style={td}>{r.ltrNeutral !== null ? <span style={{ color: colorForScore(r.ltrNeutral) }}>{r.ltrNeutral.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
+                <td style={td}>{r.ltrPositive !== null ? <span style={{ color: colorForScore(r.ltrPositive) }}>{r.ltrPositive.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
                 <td style={{ ...td, background: bgForScore(r.composite) }}><span style={{ color: colorForScore(r.composite), fontWeight: 700 }}>{r.composite !== null ? r.composite.toFixed(1) : "—"}</span></td>
               </tr>
             ))}
@@ -816,7 +822,7 @@ const CarrierRankings = ({ spRows, ltrRows, filters, setFilters, options, useNeu
             {th("actualStops", "Actual")}{th("completion", "Compl%")}{th("onTimeInWindow", "OT Win%")}
             {th("surveyPct", "Survey%")}{th("positivePct", "Pos Survey%")}{th("negativePct", "Neg Survey%")}
             {th("ltrTotal", "LTR#")}{th("ltrCount910", "9-10")}{th("ltrCount8", "8")}
-            {th("ltrCount07", "0-7")}{th("ltrStrict", "Strict LTR")}{th("ltrNeutral", "Neutral LTR")}{th("composite", "Composite")}
+            {th("ltrCount07", "0-7")}{th("ltrStrict", "Strict LTR")}{th("ltrNeutral", "Neutral LTR")}{th("ltrPositive", "Positive LTR")}{th("composite", "Composite")}
           </tr></thead>
           <tbody>
             {sorted.map((r, i) => (
@@ -837,6 +843,7 @@ const CarrierRankings = ({ spRows, ltrRows, filters, setFilters, options, useNeu
                 <td style={{ ...td, color: "#ef4444" }}>{r.ltrCount07}</td>
                 <td style={td}>{r.ltrStrict !== null ? <span style={{ color: colorForScore(r.ltrStrict) }}>{r.ltrStrict.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
                 <td style={td}>{r.ltrNeutral !== null ? <span style={{ color: colorForScore(r.ltrNeutral) }}>{r.ltrNeutral.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
+                <td style={td}>{r.ltrPositive !== null ? <span style={{ color: colorForScore(r.ltrPositive) }}>{r.ltrPositive.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
                 <td style={{ ...td, background: bgForScore(r.composite) }}><span style={{ color: colorForScore(r.composite), fontWeight: 700 }}>{r.composite !== null ? r.composite.toFixed(1) : "—"}</span></td>
               </tr>
             ))}
@@ -885,7 +892,7 @@ const StoreRankings = ({ ltrRows, filters, setFilters, options }) => {
           <thead><tr>
             {th("fleetRank", "Fleet Rank")}{th("marketRank", "Market Rank")}{th("market", "Market")}{th("storeNum", "Store #")}{th("storeName", "Store Name")}{th("ltrTotal", "LTR#")}
             {th("ltrCount910", "9-10")}{th("ltrCount8", "8")}{th("ltrCount07", "0-7")}{th("ltrStrict", "Strict LTR")}
-            {th("ltrNeutral", "Neutral LTR")}{th("detractorCount", "Detractors")}{th("topDetractor", "Top Issue")}
+            {th("ltrNeutral", "Neutral LTR")}{th("ltrPositive", "Positive LTR")}{th("detractorCount", "Detractors")}{th("topDetractor", "Top Issue")}
             <th style={thStyle}>Comments</th>
           </tr></thead>
           <tbody>
@@ -902,6 +909,7 @@ const StoreRankings = ({ ltrRows, filters, setFilters, options }) => {
                 <td style={{ ...td, color: "#ef4444" }}>{r.ltrCount07}</td>
                 <td style={td}>{r.ltrStrict !== null ? <span style={{ color: colorForScore(r.ltrStrict) }}>{r.ltrStrict.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
                 <td style={td}>{r.ltrNeutral !== null ? <span style={{ color: colorForScore(r.ltrNeutral) }}>{r.ltrNeutral.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
+                <td style={td}>{r.ltrPositive !== null ? <span style={{ color: colorForScore(r.ltrPositive) }}>{r.ltrPositive.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
                 <td style={td}><span style={{ color: r.detractorCount > 0 ? "#f87171" : "#94a3b8" }}>{r.detractorCount}</span></td>
                 <td style={td}><span style={{ color: "#94a3b8", fontSize: 12 }}>{r.topDetractor}</span></td>
                 <td style={td}>{r.comments.length > 0 && <button onClick={() => setCommentStore(r)} style={{ background: "#1e40af", color: "#93c5fd", border: "none", borderRadius: 4, padding: "3px 10px", fontSize: 12, cursor: "pointer" }}>View ({r.comments.length})</button>}</td>
@@ -950,7 +958,7 @@ const MarketRankings = ({ ltrRows, filters, setFilters }) => {
           <thead><tr>
             {th("rank", "#")}{th("market", "Market")}{th("storeCount", "Stores")}{th("ltrTotal", "LTR#")}
             {th("ltrCount910", "9-10")}{th("ltrCount8", "8")}{th("ltrCount07", "0-7")}{th("ltrStrict", "Strict LTR")}
-            {th("ltrNeutral", "Neutral LTR")}{th("detractorCount", "Detractors")}{th("topDetractor", "Top Issue")}
+            {th("ltrNeutral", "Neutral LTR")}{th("ltrPositive", "Positive LTR")}{th("detractorCount", "Detractors")}{th("topDetractor", "Top Issue")}
           </tr></thead>
           <tbody>
             {sorted.map((r, i) => (
@@ -964,6 +972,7 @@ const MarketRankings = ({ ltrRows, filters, setFilters }) => {
                 <td style={{ ...td, color: "#ef4444" }}>{r.ltrCount07}</td>
                 <td style={td}>{r.ltrStrict !== null ? <span style={{ color: colorForScore(r.ltrStrict) }}>{r.ltrStrict.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
                 <td style={td}>{r.ltrNeutral !== null ? <span style={{ color: colorForScore(r.ltrNeutral) }}>{r.ltrNeutral.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
+                <td style={td}>{r.ltrPositive !== null ? <span style={{ color: colorForScore(r.ltrPositive) }}>{r.ltrPositive.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
                 <td style={td}><span style={{ color: r.detractorCount > 0 ? "#f87171" : "#94a3b8" }}>{r.detractorCount}</span></td>
                 <td style={td}><span style={{ color: "#94a3b8", fontSize: 12 }}>{r.topDetractor}</span></td>
               </tr>
