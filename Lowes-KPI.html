@@ -122,7 +122,9 @@ const calcSurveyRates = (ltrResponses, actualStops) => {
   if (!actualStops || actualStops <= 0) return { surveyPct: null, positivePct: null, negativePct: null };
   const total = ltrResponses.length;
   const positive = ltrResponses.filter((r) => r >= 9).length;
-  const negative = ltrResponses.filter((r) => r <= 7).length;
+  // Negative matches Strict LTR's definition: anything below 9 (including 8s) counts
+  // against the score, rather than excluding 8s the way Neutral LTR does.
+  const negative = ltrResponses.filter((r) => r <= 8).length;
   return {
     surveyPct: (total / actualStops) * 100,
     positivePct: (positive / actualStops) * 100,
@@ -1080,7 +1082,9 @@ const ExecutiveSummary = ({ spRows, speRows, ltrRows, useNeutral }) => {
   const totalActualStops = spRows.reduce((s, r) => s + (r.actualStops || 0), 0);
   const surveyOverall = totalActualStops > 0 ? ((totalLTR / totalActualStops) * 100).toFixed(1) : "N/A";
   const positiveOverall = totalActualStops > 0 ? ((ltr910 / totalActualStops) * 100).toFixed(1) : "N/A";
-  const negativeOverall = totalActualStops > 0 ? ((ltr07 / totalActualStops) * 100).toFixed(1) : "N/A";
+  // Negative matches Strict LTR's definition: anything below 9 (including 8s) counts
+  // against the score, rather than excluding 8s.
+  const negativeOverall = totalActualStops > 0 ? (((ltr07 + ltr8) / totalActualStops) * 100).toFixed(1) : "N/A";
   const detMap = {};
   ltrRows.forEach((r) => { if (r.detractor) detMap[r.detractor] = (detMap[r.detractor] || 0) + 1; });
   const detData = Object.entries(detMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8);
