@@ -740,7 +740,7 @@ const DriverRankings = ({ speRows, ltrRows, filters, setFilters, options, useNeu
         <button onClick={() => exportCSV(sorted, "driver-rankings.csv")} style={exportBtn}>Export CSV</button>
       </div>
       <div style={{ color: "#64748b", fontSize: 12, marginBottom: 16, lineHeight: 1.6 }}>
-        <strong style={{ color: "#94a3b8" }}>Survey% / Pos Survey% / Neg Survey%</strong> = number of survey responses (total / 9-10 scores / 0-7 scores) ÷ Actual Stops (completed deliveries) for that driver — i.e. what share of their completed deliveries generated a survey response at all, and whether it was positive or negative.<br />
+        <strong style={{ color: "#94a3b8" }}>Take Rate% / Pos Take Rate% / Neg Take Rate%</strong> = number of survey responses (total / 9-10 scores / 0-7 scores) ÷ Actual Stops (completed deliveries) for that driver — i.e. what share of their completed deliveries generated a survey response at all, and whether it was positive or negative.<br />
         <strong style={{ color: "#94a3b8" }}>Strict LTR</strong> = (9-10s) ÷ (all responses) — 8s count against the score. <strong style={{ color: "#94a3b8" }}>Neutral LTR</strong> = (9-10s) ÷ (all responses excluding 8s) — 8s are removed entirely. <strong style={{ color: "#94a3b8" }}>Positive LTR</strong> = (9-10s + 8s) ÷ (all responses) — 8s are treated as promoters, same as a 9 or 10.<br />
         <strong style={{ color: "#94a3b8" }}>Composite</strong> = Completion% (30%) + On-Time In Window% (30%) + LTR Score (40%, {useNeutral ? "Neutral" : "Strict"}). OT% and Redelivery% are not part of this score; LTR contributes 0 when a driver has no survey responses.
       </div>
@@ -751,7 +751,7 @@ const DriverRankings = ({ speRows, ltrRows, filters, setFilters, options, useNeu
             {th("rank", "#")}{th("name", "Driver/SPE")}{th("carrier", "Carrier")}{th("routes", "Routes")}
             {th("plannedStops", "Planned")}{th("actualStops", "Actual")}{th("completion", "Compl%")}
             {th("onTimeInWindow", "OT Win%")}
-            {th("surveyPct", "Survey%")}{th("positivePct", "Pos Survey%")}{th("negativePct", "Neg Survey%")}
+            {th("surveyPct", "Take Rate%")}{th("positivePct", "Pos Take Rate%")}{th("negativePct", "Neg Take Rate%")}
             {th("ltrTotal", "LTR#")}{th("ltrCount910", "9-10")}{th("ltrCount8", "8")}{th("ltrCount07", "0-7")}
             {th("ltrStrict", "Strict LTR")}{th("ltrNeutral", "Neutral LTR")}{th("ltrPositive", "Positive LTR")}{th("composite", "Composite")}
           </tr></thead>
@@ -820,7 +820,7 @@ const CarrierRankings = ({ spRows, ltrRows, filters, setFilters, options, useNeu
           <thead><tr>
             {th("rank", "#")}{th("carrier", "Carrier")}{th("routes", "Routes")}{th("plannedStops", "Planned")}
             {th("actualStops", "Actual")}{th("completion", "Compl%")}{th("onTimeInWindow", "OT Win%")}
-            {th("surveyPct", "Survey%")}{th("positivePct", "Pos Survey%")}{th("negativePct", "Neg Survey%")}
+            {th("surveyPct", "Take Rate%")}{th("positivePct", "Pos Take Rate%")}{th("negativePct", "Neg Take Rate%")}
             {th("ltrTotal", "LTR#")}{th("ltrCount910", "9-10")}{th("ltrCount8", "8")}
             {th("ltrCount07", "0-7")}{th("ltrStrict", "Strict LTR")}{th("ltrNeutral", "Neutral LTR")}{th("ltrPositive", "Positive LTR")}{th("composite", "Composite")}
           </tr></thead>
@@ -987,6 +987,7 @@ const MarketRankings = ({ ltrRows, filters, setFilters }) => {
 
 const DetractorReview = ({ ltrRows, filters, setFilters, options }) => {
   const [detFilter, setDetFilter] = useState("");
+  const [driverFilter, setDriverFilter] = useState("");
   const [ltrFilters, setLtrFilters] = useState([]); // array of selected scores (numbers), empty = all
   const toggleLtrScore = (n) => setLtrFilters((prev) => prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]);
   const filtered = useMemo(() => ltrRows.filter((r) => {
@@ -995,11 +996,12 @@ const DetractorReview = ({ ltrRows, filters, setFilters, options }) => {
     // sheets — without merging genuinely different companies (e.g. "A&M Trucking LLC"
     // and "A & M Trucking LLC" are confirmed distinct and must NOT be treated as equal).
     if (filters.carrier && normalizeCarrier(r.carrier) !== normalizeCarrier(filters.carrier)) return false;
+    if (driverFilter && r.contractorCarrier !== driverFilter) return false;
     if (filters.search) { const s = filters.search.toLowerCase(); if (!r.store.name.toLowerCase().includes(s) && !r.contractorCarrier.toLowerCase().includes(s)) return false; }
     if (detFilter && r.detractor !== detFilter) return false;
     if (ltrFilters.length > 0 && !ltrFilters.includes(r.ltr)) return false;
     return true;
-  }), [ltrRows, filters, detFilter, ltrFilters]);
+  }), [ltrRows, filters, detFilter, driverFilter, ltrFilters]);
   const detCategories = useMemo(() => [...new Set(ltrRows.map((r) => r.detractor).filter(Boolean))], [ltrRows]);
   const { sorted, sortCol, sortDir, sort } = useSortable(filtered, "deliveryDate");
   const th = (col, label) => <Th col={col} label={label} sortCol={sortCol} sortDir={sortDir} onSort={sort} />;
@@ -1014,10 +1016,13 @@ const DetractorReview = ({ ltrRows, filters, setFilters, options }) => {
         <select value={filters.carrier || ""} onChange={(e) => setFilters((f) => ({ ...f, carrier: e.target.value }))} style={{ background: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}>
           <option value="">All Carriers</option>{(options.carrier || []).map((o) => <option key={o}>{o}</option>)}
         </select>
+        <select value={driverFilter} onChange={(e) => setDriverFilter(e.target.value)} style={{ background: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}>
+          <option value="">All Drivers/SPE</option>{(options.driver || []).map((o) => <option key={o}>{o}</option>)}
+        </select>
         <select value={detFilter} onChange={(e) => setDetFilter(e.target.value)} style={{ background: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}>
           <option value="">All Categories</option>{detCategories.map((d) => <option key={d}>{d}</option>)}
         </select>
-        <button onClick={() => { setFilters({}); setDetFilter(""); setLtrFilters([]); }} style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 6, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>Clear</button>
+        <button onClick={() => { setFilters({}); setDetFilter(""); setDriverFilter(""); setLtrFilters([]); }} style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 6, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>Clear</button>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20, alignItems: "center" }}>
         <span style={{ color: "#64748b", fontSize: 12 }}>LTR Scores:</span>
@@ -1126,9 +1131,9 @@ const ExecutiveSummary = ({ spRows, speRows, ltrRows, useNeutral }) => {
         <KPICard label="Detractors (0-7)" value={ltr07} color="#ef4444" />
         <KPICard label="Active Drivers" value={speRows.length} color="#38bdf8" />
         <KPICard label="Active Carriers" value={carrierRows.length} color="#fb923c" />
-        <KPICard label="Survey % of Deliveries" value={surveyOverall + "%"} color="#94a3b8" sub="Surveys / Actual Stops" />
-        <KPICard label="Positive Survey % of Deliveries" value={positiveOverall + "%"} color="#22c55e" sub="9-10 / Actual Stops" />
-        <KPICard label="Negative Survey % of Deliveries" value={negativeOverall + "%"} color="#ef4444" sub="0-7 / Actual Stops" />
+        <KPICard label="Take Rate % of Deliveries" value={surveyOverall + "%"} color="#94a3b8" sub="Surveys / Actual Stops" />
+        <KPICard label="Positive Take Rate % of Deliveries" value={positiveOverall + "%"} color="#22c55e" sub="9-10 / Actual Stops" />
+        <KPICard label="Negative Take Rate % of Deliveries" value={negativeOverall + "%"} color="#ef4444" sub="0-7 / Actual Stops" />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
         <div style={{ background: "#0f172a", borderRadius: 10, padding: 16, border: "1px solid #1e293b" }}>
@@ -1212,6 +1217,7 @@ function App() {
       region: [...new Set([...data.speRows.map((r) => r.region), ...data.spRows.map((r) => r.region)])].filter(Boolean).sort(),
       district: [...new Set([...data.speRows.map((r) => r.district), ...data.spRows.map((r) => r.district)])].filter(Boolean).sort(),
       market: [...new Set(data.ltrRows.map((r) => r.market))].filter(Boolean).sort(),
+      driver: [...new Set(data.ltrRows.map((r) => r.contractorCarrier))].filter(Boolean).sort(),
     };
   }, [data]);
 
