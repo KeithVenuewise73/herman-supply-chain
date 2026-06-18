@@ -433,6 +433,12 @@ const td = { padding: "8px 8px", color: "#cbd5e1", verticalAlign: "middle" };
 // Caps long carrier/driver names so they don't stretch the whole table wide; full name
 // is still available on hover via the title attribute.
 const truncated = { maxWidth: 170, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+// Alternative to truncated: wraps onto a second line instead of hiding text, so the
+// column can stay narrow without losing any of the name.
+const wrapped = { maxWidth: 130, whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.3 };
+// Caps short numeric columns (counts, small percentages) so they don't take more width
+// than their content needs, now that headers can wrap onto two lines.
+const narrow = { maxWidth: 56 };
 const thStyle = {
   padding: "9px 8px", textAlign: "left", background: "#0f172a", color: "#94a3b8",
   fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5,
@@ -474,8 +480,8 @@ const useSortable = (data, defaultCol) => {
   }), [data, sortCol, sortDir]);
   return { sorted, sortCol, sortDir, sort };
 };
-const Th = ({ col, label, sortCol, sortDir, onSort }) => (
-  <th onClick={() => onSort(col)} style={{ padding: "10px 12px", textAlign: "left", cursor: "pointer", userSelect: "none", background: "#0f172a", color: "#94a3b8", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap", position: "sticky", top: 0, zIndex: 2, borderBottom: "1px solid #1e293b" }}>
+const Th = ({ col, label, sortCol, sortDir, onSort, width }) => (
+  <th onClick={() => onSort(col)} style={{ padding: "9px 6px", textAlign: "left", cursor: "pointer", userSelect: "none", background: "#0f172a", color: "#94a3b8", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.3, width: width || undefined, position: "sticky", top: 0, zIndex: 2, borderBottom: "1px solid #1e293b" }}>
     {label}<SortIcon col={col} sortCol={sortCol} sortDir={sortDir} />
   </th>
 );
@@ -857,7 +863,7 @@ const DriverRankings = ({ speRows, ltrRows, filters, setFilters, options, useNeu
     return true;
   }), [all, filters]);
   const { sorted, sortCol, sortDir, sort } = useSortable(filtered, "composite");
-  const th = (col, label) => <Th col={col} label={label} sortCol={sortCol} sortDir={sortDir} onSort={sort} />;
+  const th = (col, label, width) => <Th col={col} label={label} sortCol={sortCol} sortDir={sortDir} onSort={sort} width={width} />;
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -871,33 +877,33 @@ const DriverRankings = ({ speRows, ltrRows, filters, setFilters, options, useNeu
       </div>
       <FiltersBar filters={filters} setFilters={setFilters} options={options} />
       <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid #1e293b" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
           <thead><tr>
-            {th("rank", "#")}{th("name", "Driver/SPE")}{th("carrier", "Carrier")}{th("routes", "Routes")}
-            {th("plannedStops", "Planned")}{th("actualStops", "Actual")}{th("completion", "Compl%")}
-            {th("onTimeInWindow", "OT Win%")}
-            {th("surveyPct", "Take Rate%")}{th("positivePct", "Pos Take Rate%")}{th("negativePct", "Neg Take Rate%")}
-            {th("ltrTotal", "LTR#")}{th("ltrCount910", "9-10")}{th("ltrCount8", "8")}{th("ltrCount07", "0-7")}
-            {th("ltrStrict", "Strict LTR")}{th("ltrNeutral", "Neutral LTR")}{th("ltrPositive", "Positive LTR")}{th("composite", "Composite")}
+            {th("rank", "#", "3%")}{th("name", "Driver/SPE", "10%")}{th("carrier", "Carrier", "9%")}{th("routes", "Routes", "4%")}
+            {th("plannedStops", "Planned", "4%")}{th("actualStops", "Actual", "4%")}{th("completion", "Compl%", "5%")}
+            {th("onTimeInWindow", "OT Win%", "5%")}
+            {th("surveyPct", "Take Rate%", "6%")}{th("positivePct", "Pos Take Rate%", "6%")}{th("negativePct", "Neg Take Rate%", "6%")}
+            {th("ltrTotal", "LTR#", "4%")}{th("ltrCount910", "9-10", "4%")}{th("ltrCount8", "8", "3%")}{th("ltrCount07", "0-7", "4%")}
+            {th("ltrStrict", "Strict LTR", "6%")}{th("ltrNeutral", "Neutral LTR", "6%")}{th("ltrPositive", "Positive LTR", "6%")}{th("composite", "Composite", "5%")}
           </tr></thead>
           <tbody>
             {sorted.map((r, i) => (
               <tr key={i} style={{ background: i % 2 === 0 ? "#0f172a" : "#111827", borderBottom: "1px solid #1e293b" }}>
                 <td style={td}><span style={{ color: "#64748b" }}>#{r.rank}</span></td>
-                <td style={td}><div style={{ color: "#f1f5f9", fontWeight: 600, ...truncated }} title={r.name}>{r.name || "—"}</div>{r.lowSample && <Badge color="#f59e0b">Low Sample</Badge>}</td>
-                <td style={td}><span style={{ color: "#94a3b8", ...truncated, display: "inline-block" }} title={r.carrier}>{r.carrier || "—"}</span></td>
-                <td style={td}>{r.routes ?? "—"}</td>
-                <td style={td}>{r.plannedStops ?? "—"}</td>
-                <td style={td}>{r.actualStops ?? "—"}</td>
+                <td style={td}><div style={{ color: "#f1f5f9", fontWeight: 600, ...wrapped }}>{r.name || "—"}</div>{r.lowSample && <Badge color="#f59e0b">Low Sample</Badge>}</td>
+                <td style={td}><span style={{ color: "#94a3b8", ...wrapped, display: "inline-block" }}>{r.carrier || "—"}</span></td>
+                <td style={{ ...td, ...narrow }}>{r.routes ?? "—"}</td>
+                <td style={{ ...td, ...narrow }}>{r.plannedStops ?? "—"}</td>
+                <td style={{ ...td, ...narrow }}>{r.actualStops ?? "—"}</td>
                 <td style={{ ...td, color: colorForScore(r.completion) }}>{r.completion !== null ? r.completion.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: colorForScore(r.onTimeInWindow) }}>{r.onTimeInWindow !== null ? r.onTimeInWindow.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: "#94a3b8" }}>{r.surveyPct !== null ? r.surveyPct.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: "#22c55e" }}>{r.positivePct !== null ? r.positivePct.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: "#ef4444" }}>{r.negativePct !== null ? r.negativePct.toFixed(1) + "%" : "—"}</td>
-                <td style={td}>{r.ltrTotal}</td>
-                <td style={{ ...td, color: "#22c55e" }}>{r.ltrCount910}</td>
-                <td style={{ ...td, color: "#eab308" }}>{r.ltrCount8}</td>
-                <td style={{ ...td, color: "#ef4444" }}>{r.ltrCount07}</td>
+                <td style={{ ...td, ...narrow }}>{r.ltrTotal}</td>
+                <td style={{ ...td, ...narrow, color: "#22c55e" }}>{r.ltrCount910}</td>
+                <td style={{ ...td, ...narrow, color: "#eab308" }}>{r.ltrCount8}</td>
+                <td style={{ ...td, ...narrow, color: "#ef4444" }}>{r.ltrCount07}</td>
                 <td style={td}>{r.ltrStrict !== null ? <span style={{ color: colorForScore(r.ltrStrict) }}>{r.ltrStrict.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
                 <td style={td}>{r.ltrNeutral !== null ? <span style={{ color: colorForScore(r.ltrNeutral) }}>{r.ltrNeutral.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
                 <td style={td}>{r.ltrPositive !== null ? <span style={{ color: colorForScore(r.ltrPositive) }}>{r.ltrPositive.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
@@ -921,7 +927,7 @@ const CarrierRankings = ({ spRows, ltrRows, filters, setFilters, options, useNeu
     return true;
   }), [all, filters]);
   const { sorted, sortCol, sortDir, sort } = useSortable(filtered, "composite");
-  const th = (col, label) => <Th col={col} label={label} sortCol={sortCol} sortDir={sortDir} onSort={sort} />;
+  const th = (col, label, width) => <Th col={col} label={label} sortCol={sortCol} sortDir={sortDir} onSort={sort} width={width} />;
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -941,31 +947,31 @@ const CarrierRankings = ({ spRows, ltrRows, filters, setFilters, options, useNeu
         <button onClick={() => setFilters((f) => ({ search: "", carrier: "", region: "" }))} style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 6, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>Clear</button>
       </div>
       <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid #1e293b" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
           <thead><tr>
-            {th("rank", "#")}{th("carrier", "Carrier")}{th("routes", "Routes")}{th("plannedStops", "Planned")}
-            {th("actualStops", "Actual")}{th("completion", "Compl%")}{th("onTimeInWindow", "OT Win%")}
-            {th("surveyPct", "Take Rate%")}{th("positivePct", "Pos Take Rate%")}{th("negativePct", "Neg Take Rate%")}
-            {th("ltrTotal", "LTR#")}{th("ltrCount910", "9-10")}{th("ltrCount8", "8")}
-            {th("ltrCount07", "0-7")}{th("ltrStrict", "Strict LTR")}{th("ltrNeutral", "Neutral LTR")}{th("ltrPositive", "Positive LTR")}{th("composite", "Composite")}
+            {th("rank", "#", "3%")}{th("carrier", "Carrier", "14%")}{th("routes", "Routes", "4%")}{th("plannedStops", "Planned", "4%")}
+            {th("actualStops", "Actual", "4%")}{th("completion", "Compl%", "6%")}{th("onTimeInWindow", "OT Win%", "6%")}
+            {th("surveyPct", "Take Rate%", "7%")}{th("positivePct", "Pos Take Rate%", "7%")}{th("negativePct", "Neg Take Rate%", "7%")}
+            {th("ltrTotal", "LTR#", "4%")}{th("ltrCount910", "9-10", "4%")}{th("ltrCount8", "8", "3%")}
+            {th("ltrCount07", "0-7", "4%")}{th("ltrStrict", "Strict LTR", "6%")}{th("ltrNeutral", "Neutral LTR", "6%")}{th("ltrPositive", "Positive LTR", "6%")}{th("composite", "Composite", "5%")}
           </tr></thead>
           <tbody>
             {sorted.map((r, i) => (
               <tr key={i} style={{ background: i % 2 === 0 ? "#0f172a" : "#111827", borderBottom: "1px solid #1e293b" }}>
                 <td style={td}><span style={{ color: "#64748b" }}>#{r.rank}</span></td>
-                <td style={td}><div style={{ color: "#f1f5f9", fontWeight: 600, ...truncated }} title={r.carrier}>{r.carrier || "—"}</div>{r.lowSample && <Badge color="#f59e0b">Low Sample</Badge>}</td>
-                <td style={td}>{r.routes ?? "—"}</td>
-                <td style={td}>{r.plannedStops ?? "—"}</td>
-                <td style={td}>{r.actualStops ?? "—"}</td>
+                <td style={td}><div style={{ color: "#f1f5f9", fontWeight: 600, ...wrapped }}>{r.carrier || "—"}</div>{r.lowSample && <Badge color="#f59e0b">Low Sample</Badge>}</td>
+                <td style={{ ...td, ...narrow }}>{r.routes ?? "—"}</td>
+                <td style={{ ...td, ...narrow }}>{r.plannedStops ?? "—"}</td>
+                <td style={{ ...td, ...narrow }}>{r.actualStops ?? "—"}</td>
                 <td style={{ ...td, color: colorForScore(r.completion) }}>{r.completion !== null ? r.completion.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: colorForScore(r.onTimeInWindow) }}>{r.onTimeInWindow !== null ? r.onTimeInWindow.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: "#94a3b8" }}>{r.surveyPct !== null ? r.surveyPct.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: "#22c55e" }}>{r.positivePct !== null ? r.positivePct.toFixed(1) + "%" : "—"}</td>
                 <td style={{ ...td, color: "#ef4444" }}>{r.negativePct !== null ? r.negativePct.toFixed(1) + "%" : "—"}</td>
-                <td style={td}>{r.ltrTotal}</td>
-                <td style={{ ...td, color: "#22c55e" }}>{r.ltrCount910}</td>
-                <td style={{ ...td, color: "#eab308" }}>{r.ltrCount8}</td>
-                <td style={{ ...td, color: "#ef4444" }}>{r.ltrCount07}</td>
+                <td style={{ ...td, ...narrow }}>{r.ltrTotal}</td>
+                <td style={{ ...td, ...narrow, color: "#22c55e" }}>{r.ltrCount910}</td>
+                <td style={{ ...td, ...narrow, color: "#eab308" }}>{r.ltrCount8}</td>
+                <td style={{ ...td, ...narrow, color: "#ef4444" }}>{r.ltrCount07}</td>
                 <td style={td}>{r.ltrStrict !== null ? <span style={{ color: colorForScore(r.ltrStrict) }}>{r.ltrStrict.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
                 <td style={td}>{r.ltrNeutral !== null ? <span style={{ color: colorForScore(r.ltrNeutral) }}>{r.ltrNeutral.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
                 <td style={td}>{r.ltrPositive !== null ? <span style={{ color: colorForScore(r.ltrPositive) }}>{r.ltrPositive.toFixed(1)}%</span> : <span style={{ color: "#475569" }}>N/A</span>}</td>
@@ -1171,8 +1177,8 @@ const DetractorReview = ({ ltrRows, filters, setFilters, options }) => {
               <tr key={i} style={{ background: i % 2 === 0 ? "#0f172a" : "#111827", borderBottom: "1px solid #1e293b" }}>
                 <td style={td}><span style={{ color: "#64748b", whiteSpace: "nowrap" }}>{r.deliveryDate || "—"}</span></td>
                 <td style={td}><span style={{ color: "#38bdf8", fontWeight: 600 }}>{r.store.number}</span><span style={{ color: "#94a3b8", marginLeft: 4, fontSize: 12 }} title={r.store.name}>{r.store.name}</span></td>
-                <td style={{ ...td, ...truncated, display: "table-cell" }} title={r.carrier}>{r.carrier || "—"}</td>
-                <td style={{ ...td, ...truncated, display: "table-cell" }} title={r.contractorCarrier}>{r.contractorCarrier || "—"}</td>
+                <td style={{ ...td, ...wrapped }}>{r.carrier || "—"}</td>
+                <td style={{ ...td, ...wrapped }}>{r.contractorCarrier || "—"}</td>
                 <td style={td}><span style={{ fontWeight: 700, fontSize: 15, color: r.ltr >= 9 ? "#22c55e" : r.ltr === 8 ? "#eab308" : "#ef4444" }}>{r.ltr}</span></td>
                 <td style={td}>{r.detractor ? <Badge color="#f87171">{r.detractor}</Badge> : <span style={{ color: "#475569" }}>—</span>}</td>
                 <td style={{ ...td, ...truncated, maxWidth: 200, display: "table-cell" }} title={r.improvementComment}><span style={{ color: "#94a3b8", fontSize: 12 }}>{r.improvementComment || "—"}</span></td>
